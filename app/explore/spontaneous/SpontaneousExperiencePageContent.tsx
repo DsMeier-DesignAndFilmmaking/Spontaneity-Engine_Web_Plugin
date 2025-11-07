@@ -227,12 +227,12 @@ export default function SpontaneousExperiencePageContent() {
           </motion.aside>
         )}
         {isDetailOpen && detailEvent && (
-          <motion.aside
-            key="detail-panel"
-            className="pointer-events-auto absolute inset-y-0 left-0 z-30 flex w-full max-w-sm flex-col bg-white shadow-2xl md:left-[min(24rem,60vw)] md:max-w-md"
-            initial={{ x: "-100%", opacity: 0 }}
+           <motion.aside
+             key="detail-panel"
+            className="pointer-events-auto absolute inset-y-0 z-30 flex w-full max-w-sm flex-col bg-white shadow-2xl md:right-[min(24rem,60vw)] md:max-w-md"
+            initial={{ x: "100%", opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
-            exit={{ x: "-100%", opacity: 0 }}
+            exit={{ x: "100%", opacity: 0 }}
             transition={{ duration: 0.25, ease: "easeOut" }}
           >
             <EventDetailPanel
