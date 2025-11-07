@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import MapView from "@/app/components/MapView";
 import EventFeed from "@/app/components/EventFeed";
 import { Event } from "@/lib/types";
+import type { NavigationRoutePayload } from "@/lib/mapbox";
 
 export default function SpontaneousExperiencePageContent() {
   const router = useRouter();
@@ -19,6 +20,7 @@ export default function SpontaneousExperiencePageContent() {
   const [hasLoaded, setHasLoaded] = useState(false);
   const [selectedEventId, setSelectedEventId] = useState<string | undefined>();
   const [panelOpen, setPanelOpen] = useState(false);
+  const [activeRoute, setActiveRoute] = useState<NavigationRoutePayload | null>(null);
 
   const handleBack = useCallback(() => {
     if (typeof window !== "undefined" && window.history.length > 1) {
@@ -61,6 +63,8 @@ export default function SpontaneousExperiencePageContent() {
             events={events}
             selectedEventId={selectedEventId}
             onEventClick={(event) => setSelectedEventId(event.id)}
+            navigationRoute={activeRoute}
+            onClearNavigation={() => setActiveRoute(null)}
           />
 
           <motion.button
@@ -162,6 +166,7 @@ export default function SpontaneousExperiencePageContent() {
             <div className="flex-1 overflow-y-auto px-4 pb-6 pt-4">
               <EventFeed
                 onEventsChange={handleEventsChange}
+                onNavigationRouteChange={setActiveRoute}
                 defaultApiKey={apiKey}
                 defaultTenantId={tenantId}
                 showTestingControls={false}

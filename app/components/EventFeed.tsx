@@ -4,14 +4,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Timestamp } from "firebase/firestore";
 import EventCard from "./EventCard";
 import EventForm from "./EventForm";
+import Loader from "./Loader";
 import { useAuth } from "./AuthContext";
 import { Event, EventFormData } from "@/lib/types";
 import { getCurrentLocation } from "@/lib/hooks/useGeolocation";
 import { useHangoutsFeed } from "@/lib/hooks/useHangoutsFeed";
-import Loader from "./Loader";
-import NavigationModal from "./NavigationModal";
-import { getWalkingRoute, type DirectionsStep } from "@/lib/mapbox";
-import type { Feature, LineString } from "geojson";
+import { getWalkingRoute, type DirectionsStep, type NavigationRoutePayload } from "@/lib/mapbox";
 
 interface ApiResponse {
   events: Event[];
@@ -70,6 +68,7 @@ interface EventFeedProps {
   aiBadgeColor?: string; // Background color for AI badge
   aiBadgeTextColor?: string; // Text color for AI badge
   aiBackgroundColor?: string; // Background color for AI event cards
+  onNavigationRouteChange?: (payload: NavigationRoutePayload | null) => void;
 }
 
 const EARTH_RADIUS_METERS = 6_371_000;
@@ -113,6 +112,7 @@ export default function EventFeed({
   aiBadgeColor = "#fef3c7",
   aiBadgeTextColor = "#92400e",
   aiBackgroundColor = "#f5f3ff",
+  onNavigationRouteChange = () => undefined,
 }: EventFeedProps) {
   const { user, loading: authLoading } = useAuth();
   const [showForm, setShowForm] = useState(false);
@@ -141,17 +141,6 @@ export default function EventFeed({
   const [useApiKey, setUseApiKey] = useState(!!defaultApiKey);
 
   const [navigationLoading, setNavigationLoading] = useState(false);
-  const [navigationState, setNavigationState] = useState<
-    | null
-    | {
-        routeFeature: Feature<LineString>;
-        steps: DirectionsStep[];
-        origin: { lat: number; lng: number };
-        destination: { lat: number; lng: number; name?: string };
-        title?: string;
-      }
-  >(null);
-  
   const { hangouts, loading: hangoutsLoading, error: hangoutsError } = useHangoutsFeed({
     tenantId: useApiKey ? undefined : tenantId || undefined,
     tags: tags.length > 0 ? tags : undefined,
@@ -312,6 +301,7 @@ export default function EventFeed({
       }
 
       setNavigationLoading(true);
+      onNavigationRouteChange?.(null);
       navigator.geolocation.getCurrentPosition(
         async (position) => {
           try {
@@ -339,8 +329,8 @@ export default function EventFeed({
 
             const route = await getWalkingRoute(originCoords, destinationCoords);
 
-            setNavigationState({
-              routeFeature: route.feature,
+            onNavigationRouteChange?.({
+              feature: route.feature,
               steps: route.steps,
               origin: originCoords,
               destination: destinationCoords,
@@ -351,6 +341,7 @@ export default function EventFeed({
             const message =
               error instanceof Error ? error.message : "Unable to calculate walking route.";
             showNotification("error", message);
+            onNavigationRouteChange?.(null);
           } finally {
             setNavigationLoading(false);
           }
@@ -374,6 +365,7 @@ export default function EventFeed({
             default:
               showNotification("error", "Unexpected geolocation error occurred.");
           }
+          onNavigationRouteChange?.(null);
         },
         {
           enableHighAccuracy: true,
@@ -939,16 +931,6 @@ export default function EventFeed({
         </div>
       )}
 
-      {navigationState && (
-        <NavigationModal
-          routeFeature={navigationState.routeFeature}
-          origin={navigationState.origin}
-          destination={navigationState.destination}
-          steps={navigationState.steps}
-          title={navigationState.title}
-          onClose={() => setNavigationState(null)}
-        />
-      )}
     </div>
   );
 }

@@ -4,6 +4,7 @@ import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { getCurrentLocation } from "@/lib/hooks/useGeolocation";
 import { Event } from "@/lib/types";
+import type { NavigationRoutePayload, DirectionsStep } from "@/lib/mapbox";
 
 mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_KEY || "";
 if (typeof window !== "undefined") {
@@ -16,6 +17,8 @@ interface MapViewProps {
   selectedEventId?: string;
   mapStyle?: string; // Mapbox style URL
   primaryColor?: string; // For user location marker
+  navigationRoute?: NavigationRoutePayload | null;
+  onClearNavigation?: () => void;
 }
 
 export default function MapView({
@@ -24,14 +27,26 @@ export default function MapView({
   selectedEventId,
   mapStyle = "mapbox://styles/mapbox/streets-v12",
   primaryColor = "#3b82f6",
+  navigationRoute,
+  onClearNavigation,
 }: MapViewProps) {
   const mapContainer = useRef<HTMLDivElement | null>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const userMarker = useRef<mapboxgl.Marker | null>(null);
   const eventMarkers = useRef<mapboxgl.Marker[]>([]);
+  const navigationMarkers = useRef<{ origin: mapboxgl.Marker | null; destination: mapboxgl.Marker | null }>({
+    origin: null,
+    destination: null,
+  });
   const [locationPermission, setLocationPermission] = useState<"granted" | "denied" | "prompt" | "checking">("checking");
   const [isLocating, setIsLocating] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
+  const [activeSteps, setActiveSteps] = useState<DirectionsStep[]>([]);
+  const [activeDestinationName, setActiveDestinationName] = useState<string | undefined>();
+  const [activeTitle, setActiveTitle] = useState<string | undefined>();
+
+  const ROUTE_SOURCE_ID = "active-navigation-route";
+  const ROUTE_LAYER_ID = "active-navigation-route-layer";
 
   // Initialize map
   useEffect(() => {
@@ -183,6 +198,110 @@ export default function MapView({
     }
   }, [locationPermission, centerOnUserLocation, isLocating]);
 
+  const clearNavigationOverlays = useCallback(() => {
+    if (!map.current) return;
+
+    const source = map.current.getSource(ROUTE_SOURCE_ID) as mapboxgl.GeoJSONSource | undefined;
+    if (source) {
+      source.setData({ type: "FeatureCollection", features: [] });
+    }
+
+    if (map.current.getLayer(ROUTE_LAYER_ID)) {
+      map.current.removeLayer(ROUTE_LAYER_ID);
+    }
+
+    if (map.current.getSource(ROUTE_SOURCE_ID)) {
+      map.current.removeSource(ROUTE_SOURCE_ID);
+    }
+
+    navigationMarkers.current.origin?.remove();
+    navigationMarkers.current.destination?.remove();
+    navigationMarkers.current = { origin: null, destination: null };
+    setActiveSteps([]);
+    setActiveDestinationName(undefined);
+    setActiveTitle(undefined);
+  }, []);
+
+  useEffect(() => {
+    if (!map.current) return;
+
+    if (!navigationRoute) {
+      clearNavigationOverlays();
+      return;
+    }
+
+    const ensureRouteLayer = () => {
+      if (!map.current) return;
+
+      const geojson = {
+        type: "FeatureCollection" as const,
+        features: [navigationRoute.feature],
+      };
+
+      if (!map.current.getSource(ROUTE_SOURCE_ID)) {
+        map.current.addSource(ROUTE_SOURCE_ID, {
+          type: "geojson",
+          data: geojson,
+        });
+      } else {
+        const source = map.current.getSource(ROUTE_SOURCE_ID) as mapboxgl.GeoJSONSource;
+        source.setData(geojson);
+      }
+
+      if (!map.current.getLayer(ROUTE_LAYER_ID)) {
+        map.current.addLayer({
+          id: ROUTE_LAYER_ID,
+          type: "line",
+          source: ROUTE_SOURCE_ID,
+          layout: {
+            "line-join": "round",
+            "line-cap": "round",
+          },
+          paint: {
+            "line-color": "#3b82f6",
+            "line-width": 6,
+            "line-opacity": 0.85,
+          },
+        });
+      }
+
+      navigationMarkers.current.origin?.remove();
+      navigationMarkers.current.destination?.remove();
+
+      navigationMarkers.current.origin = new mapboxgl.Marker({ color: "#22c55e" })
+        .setLngLat([navigationRoute.origin.lng, navigationRoute.origin.lat])
+        .setPopup(new mapboxgl.Popup().setText("You"))
+        .addTo(map.current!);
+
+      navigationMarkers.current.destination = new mapboxgl.Marker({ color: "#ef4444" })
+        .setLngLat([navigationRoute.destination.lng, navigationRoute.destination.lat])
+        .setPopup(
+          new mapboxgl.Popup().setText(navigationRoute.destination.name ?? navigationRoute.title ?? "Destination")
+        )
+        .addTo(map.current!);
+
+      const bounds = new mapboxgl.LngLatBounds();
+      navigationRoute.feature.geometry.coordinates.forEach((coord) => {
+        bounds.extend(coord as mapboxgl.LngLatLike);
+      });
+      map.current!.fitBounds(bounds, { padding: 80, duration: 1000 });
+
+      setActiveSteps(navigationRoute.steps);
+      setActiveDestinationName(navigationRoute.destination.name);
+      setActiveTitle(navigationRoute.title);
+    };
+
+    if (map.current.isStyleLoaded()) {
+      ensureRouteLayer();
+    } else {
+      map.current.once("styledata", ensureRouteLayer);
+    }
+
+    return () => {
+      map.current?.off("styledata", ensureRouteLayer);
+    };
+  }, [navigationRoute, clearNavigationOverlays]);
+
   // Update event markers when events change (API-first: consume API data only)
   useEffect(() => {
     if (!map.current || !events.length) {
@@ -332,6 +451,59 @@ export default function MapView({
           </p>
         </div>
       )}
+
+      {navigationRoute && activeSteps.length > 0 && (
+        <div className="pointer-events-auto absolute left-4 top-4 z-40 max-h-[75vh] w-72 overflow-hidden rounded-2xl bg-white/95 shadow-2xl backdrop-blur">
+          <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
+            <div>
+              <p className="text-xs font-medium uppercase text-blue-600">Walking Directions</p>
+              <h3 className="text-sm font-semibold text-gray-900">
+                {activeTitle ?? activeDestinationName ?? "Destination"}
+              </h3>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                clearNavigationOverlays();
+                onClearNavigation?.();
+              }}
+              className="rounded-full p-1 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700"
+              aria-label="Close navigation"
+            >
+              ×
+            </button>
+          </div>
+
+          <ol className="max-h-[60vh] space-y-2 overflow-y-auto px-4 py-3 text-xs text-gray-700">
+            {activeSteps.map((step, index) => (
+              <li key={`${step.instruction}-${index}`} className="rounded-lg bg-gray-50 p-3">
+                <p className="font-semibold text-gray-900">{step.instruction || `Step ${index + 1}`}</p>
+                <p className="mt-1 text-[11px] text-gray-500">
+                  {formatDistance(step.distance)} · {formatDuration(step.duration)}{" "}
+                  {step.name ? `via ${step.name}` : ""}
+                </p>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
     </div>
   );
+}
+
+function formatDistance(meters: number): string {
+  if (meters >= 1000) {
+    return `${(meters / 1000).toFixed(1)} km`;
+  }
+  return `${Math.round(meters)} m`;
+}
+
+function formatDuration(seconds: number): string {
+  const minutes = Math.round(seconds / 60);
+  if (minutes >= 60) {
+    const hours = Math.floor(minutes / 60);
+    const remaining = minutes % 60;
+    return `${hours}h ${remaining}m`;
+  }
+  return `${minutes} min`;
 }

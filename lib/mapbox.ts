@@ -12,6 +12,14 @@ export interface DirectionsStep {
   instruction: string;
 }
 
+export interface NavigationRoutePayload {
+  feature: Feature<LineString>;
+  steps: DirectionsStep[];
+  origin: { lat: number; lng: number };
+  destination: { lat: number; lng: number; name?: string };
+  title?: string;
+}
+
 interface MapboxDirectionsResponse {
   routes?: Array<{
     geometry?: { coordinates: [number, number][]; type: string };
