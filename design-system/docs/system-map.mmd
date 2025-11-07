@@ -1,0 +1,70 @@
+graph TD
+    A[Design Tokens] --> B[Colors]
+    A --> C[Typography]
+    A --> D[Spacing]
+    A --> E[Shadows]
+    A --> F[Radius]
+    
+    B --> G[Brand Colors]
+    B --> H[Neutral Colors]
+    B --> I[Status Colors]
+    B --> J[Travel Semantic Colors]
+    
+    C --> K[Font Families]
+    C --> L[Font Sizes]
+    C --> M[Font Weights]
+    C --> N[Text Styles]
+    
+    D --> O[Base Scale 4px]
+    D --> P[Semantic Spacing]
+    
+    E --> Q[Elevation Levels]
+    E --> R[Brand Shadows]
+    E --> S[Focus States]
+    
+    F --> T[Base Radius]
+    F --> U[Semantic Radius]
+    
+    V[Themes] --> W[Default Theme]
+    V --> X[Client Theme Example]
+    V --> Y[Custom Client Themes]
+    
+    W --> A
+    X --> A
+    Y --> A
+    
+    Z[Components] --> AA[Card]
+    Z --> AB[Button]
+    Z --> AC[Future Components]
+    
+    AA --> A
+    AB --> A
+    AC --> A
+    
+    AD[UI Components] --> AE[EventCard]
+    AD --> AF[EventFeed]
+    AD --> AG[Navbar]
+    AD --> AH[MapView]
+    
+    AE --> A
+    AF --> A
+    AG --> A
+    AH --> A
+    
+    AI[Application] --> AD
+    AI --> AJ[Pages]
+    
+    AJ --> AK[Dashboard]
+    AJ --> AL[Explore]
+    AJ --> AM[Login]
+    
+    AN[API] --> AI
+    AN --> AO[Plugin API]
+    AN --> AP[Event API]
+    
+    style A fill:#007AFF,stroke:#005C99,stroke-width:3px,color:#fff
+    style V fill:#2AB7CA,stroke:#2198A8,stroke-width:2px,color:#fff
+    style Z fill:#FF7A59,stroke:#E65C3E,stroke-width:2px,color:#fff
+    style AD fill:#FFB700,stroke:#CC9500,stroke-width:2px,color:#fff
+    style AI fill:#33D9B2,stroke:#2AB7A8,stroke-width:2px,color:#fff
+    style AN fill:#6B7280,stroke:#4B5563,stroke-width:2px,color:#fff
