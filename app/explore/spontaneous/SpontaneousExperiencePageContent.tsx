@@ -172,7 +172,18 @@ export default function SpontaneousExperiencePageContent() {
             transition={{ duration: 0.2, ease: "easeOut" }}
           >
             <header className="sticky top-0 z-10 border-b border-gray-200 bg-white/95 px-5 pb-3 pt-24 md:pt-20 backdrop-blur">
-              <div className="flex items-center gap-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs font-medium uppercase tracking-wide text-blue-600">
+                    Feeling Spontaneous?
+                  </p>
+                  <h2 className="text-xl font-semibold text-gray-900">
+                    Explore Hang Outs and Things To Do
+                  </h2>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Live and upcoming community hang outs based on real-time information, such as weather, time and your saved and learned preferences.
+                  </p>
+                </div>
                 <button
                   type="button"
                   onClick={() => {
@@ -185,17 +196,6 @@ export default function SpontaneousExperiencePageContent() {
                 >
                   ×
                 </button>
-                <div>
-                  <p className="text-xs font-medium uppercase tracking-wide text-blue-600">
-                    Feeling Spontaneous?
-                  </p>
-                  <h2 className="text-xl font-semibold text-gray-900">
-                    Explore Hang Outs and Things To Do
-                  </h2>
-                  <p className="mt-1 text-xs text-gray-500">
-                    Live and upcoming community hang outs based on real-time information, such as weather, time and your saved and learned preferences.
-                  </p>
-                </div>
               </div>
             </header>
 

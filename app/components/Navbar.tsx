@@ -118,6 +118,24 @@ export default function Navbar() {
                   </svg>
                 </Link>
               ))}
+              {user && (
+                <Link
+                  href="/settings"
+                  onClick={handleItemClick}
+                  className={`flex items-center justify-between rounded-xl border px-4 py-3 text-sm font-medium transition hover:bg-gray-50 ${
+                    pathname === "/settings" ? "border-blue-600 text-blue-600" : "border-gray-200 text-gray-800"
+                  }`}
+                >
+                  Settings
+                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M10.5 6a2.5 2.5 0 114.95.5h2.3a.75.75 0 01.74.648l.3 2.1a.75.75 0 01-.362.744l-1.9 1.095a7.446 7.446 0 010 1.406l1.9 1.095a.75.75 0 01.362.744l-.3 2.1a.75.75 0 01-.74.648h-2.3a2.5 2.5 0 11-4.95.5 2.5 2.5 0 11-4.95-.5H3.25a.75.75 0 01-.74-.648l-.3-2.1a.75.75 0 01.362-.744l1.9-1.095a7.446 7.446 0 010-1.406l-1.9-1.095a.75.75 0 01-.362-.744l.3-2.1a.75.75 0 01.74-.648h2.3A2.5 2.5 0 119.5 6c0 .171-.017.338-.05.5h1.05A2.5 2.5 0 1110.5 6z"
+                    />
+                  </svg>
+                </Link>
+              )}
             </nav>
 
             <div className="mt-6 rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-700">
