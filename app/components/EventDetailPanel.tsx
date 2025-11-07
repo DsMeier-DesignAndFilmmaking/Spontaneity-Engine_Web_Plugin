@@ -38,6 +38,7 @@ export default function EventDetailPanel({ event, onClose }: EventDetailPanelPro
   const postedAt = resolveDate(event.createdAt);
   const tags = Array.isArray(event.tags) ? event.tags : [];
   const hasLocation = Boolean(event.location && typeof event.location.lat === "number" && typeof event.location.lng === "number");
+  const isAI = (event.source ?? "").toLowerCase() === "ai" || (event.createdBy ?? "").toLowerCase() === "ai" || event.id?.startsWith("AI-");
 
   const mapLink = hasLocation
     ? `https://www.google.com/maps/search/?api=1&query=${event.location!.lat},${event.location!.lng}`
@@ -74,7 +75,28 @@ export default function EventDetailPanel({ event, onClose }: EventDetailPanelPro
           )}
         </section>
 
-        {tags.length > 0 && (
+        {isAI && (
+          <section className="mt-6 space-y-3 rounded-xl border border-indigo-100 bg-indigo-50/70 p-4">
+            <h4 className="text-sm font-semibold text-indigo-900">Why you&apos;re seeing this</h4>
+            <p className="text-sm text-indigo-900/80 leading-relaxed">
+              Our concierge looked at live conditions (weather, time of day, trending hang outs) together with your saved preferences to surface this suggestion. Tags highlight the context the model focused on.
+            </p>
+            {tags.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {tags.map((tag) => (
+                  <span
+                    key={`ai-context-${tag}`}
+                    className="inline-flex items-center rounded-full bg-white/90 px-3 py-1 text-xs font-semibold text-indigo-700 shadow-sm"
+                  >
+                    #{tag}
+                  </span>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+
+        {tags.length > 0 && !isAI && (
           <section className="mt-6 space-y-2">
             <h4 className="text-sm font-semibold text-gray-900">Tags</h4>
             <div className="flex flex-wrap gap-2">

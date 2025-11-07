@@ -296,32 +296,22 @@ export default function EventCard({
       ) : (
         <>
           {event.location && onNavigate ? (
-            !isAI ? (
-              <div className="mt-3 flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => onMoreInfo?.(event)}
-                  className="flex-1 rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-900 transition hover:bg-gray-100"
-                >
-                  More Info
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onNavigate(event)}
-                  className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700"
-                >
-                  Let's Go!
-                </button>
-              </div>
-            ) : (
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                onClick={() => onMoreInfo?.(event)}
+                className="flex-1 rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-900 transition hover:bg-gray-100"
+              >
+                More Info
+              </button>
               <button
                 type="button"
                 onClick={() => onNavigate(event)}
-                className="mt-3 w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700"
+                className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700"
               >
                 Let's Go!
               </button>
-            )
+            </div>
           ) : null}
         </>
       )}
