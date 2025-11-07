@@ -45,20 +45,20 @@ export default function EventDetailPanel({ event, onClose }: EventDetailPanelPro
 
   return (
     <aside className="flex h-full flex-col bg-white">
-      <header className="flex items-start justify-between border-b border-gray-200 px-5 py-4">
+      <header className="flex items-start gap-3 border-b border-gray-200 px-5 py-4">
+        <button
+          type="button"
+          onClick={onClose}
+          className="mt-1 flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 text-gray-500 transition hover:border-gray-300 hover:text-gray-700 md:hidden"
+          aria-label="Close details"
+        >
+          ×
+        </button>
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">Hang Out Details</p>
           <h3 className="text-lg font-semibold text-gray-900">{event.title || "Untitled Hang Out"}</h3>
           <p className="mt-1 text-xs text-gray-500">Posted {formatDateTime(postedAt)}</p>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-full border border-gray-200 bg-white p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700"
-          aria-label="Close details"
-        >
-          ×
-        </button>
       </header>
 
       <div className="flex-1 overflow-y-auto px-5 py-4">

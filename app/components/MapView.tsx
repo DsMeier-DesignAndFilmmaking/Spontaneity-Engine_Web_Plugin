@@ -396,7 +396,7 @@ export default function MapView({
       <button
         onClick={centerOnUserLocation}
         disabled={isLocating}
-        className="absolute bottom-16 right-4 md:bottom-5 z-30 bg-white rounded-full p-3 shadow-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        className="absolute bottom-28 right-4 md:bottom-8 md:right-8 z-30 bg-white rounded-full p-3 shadow-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         aria-label="Center on my location"
         title="Center on my location"
       >
@@ -473,7 +473,7 @@ export default function MapView({
       )}
 
       {navigationRoute && activeSteps.length > 0 && (
-        <div className="pointer-events-auto absolute left-4 top-24 z-40 max-h-[70vh] w-72 overflow-hidden rounded-2xl bg-white/95 shadow-2xl backdrop-blur">
+        <div className="pointer-events-auto absolute left-4 top-32 z-40 max-h-[66vh] w-72 overflow-hidden rounded-2xl bg-white/95 shadow-2xl backdrop-blur md:left-6 md:top-32">
           <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
             <div>
               <p className="text-xs font-medium uppercase text-blue-600">Walking Directions</p>

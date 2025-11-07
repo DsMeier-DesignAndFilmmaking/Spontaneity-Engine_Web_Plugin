@@ -172,7 +172,19 @@ export default function SpontaneousExperiencePageContent() {
             transition={{ duration: 0.2, ease: "easeOut" }}
           >
             <header className="sticky top-0 z-10 border-b border-gray-200 bg-white/95 px-5 pb-3 pt-24 md:pt-20 backdrop-blur">
-              <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPanelOpen(false);
+                    setDetailEvent(null);
+                    setIsDetailOpen(false);
+                  }}
+                  className="mt-1 flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 text-gray-500 transition hover:border-gray-300 hover:text-gray-700"
+                  aria-label="Close panel"
+                >
+                  ×
+                </button>
                 <div>
                   <p className="text-xs font-medium uppercase tracking-wide text-blue-600">
                     Feeling Spontaneous?
@@ -184,18 +196,6 @@ export default function SpontaneousExperiencePageContent() {
                     Live and upcoming community hang outs based on real-time information, such as weather, time and your saved and learned preferences.
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPanelOpen(false);
-                    setDetailEvent(null);
-                    setIsDetailOpen(false);
-                  }}
-                  className="flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 text-gray-500 transition hover:border-gray-300 hover:text-gray-700"
-                  aria-label="Close panel"
-                >
-                  ×
-                </button>
               </div>
             </header>
 
@@ -235,6 +235,17 @@ export default function SpontaneousExperiencePageContent() {
             exit={{ x: "100%", opacity: 0 }}
             transition={{ duration: 0.25, ease: "easeOut" }}
           >
+            <button
+              type="button"
+              onClick={() => {
+                setDetailEvent(null);
+                setIsDetailOpen(false);
+              }}
+              className="pointer-events-auto absolute left-[-3rem] top-6 hidden h-10 w-10 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 shadow-lg transition hover:border-gray-300 hover:text-gray-700 md:flex"
+              aria-label="Close details panel"
+            >
+              ×
+            </button>
             <EventDetailPanel
               event={detailEvent}
               onClose={() => {
