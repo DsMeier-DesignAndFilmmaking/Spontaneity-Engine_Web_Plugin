@@ -270,9 +270,9 @@ export default function EventCard({
             ))}
           </div>
 
-          <div className="text-xs text-gray-700 mt-2">
-            {isAI ? "🤖 AI Generated" : `Created ${formatDate(event.createdAt)}`}
-          </div>
+          {isAI && (
+            <div className="text-xs text-gray-700 mt-2">🤖 AI Generated</div>
+          )}
         </>
       )}
     </div>

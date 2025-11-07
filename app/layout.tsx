@@ -8,7 +8,7 @@ import { AuthProvider } from './components/AuthContext';
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <body className="min-h-screen bg-gray-50 text-gray-800">
+      <body className="min-h-screen bg-white text-gray-800">
         <AuthProvider>
           <Navbar />
           <main className="w-full">{children}</main>
