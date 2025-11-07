@@ -55,6 +55,7 @@ type FirestoreEventRecord = {
   location?: { lat: number; lng: number };
   createdBy?: string;
   createdAt?: Date | string | FirestoreTimestampLike;
+  tenantId?: string;
 };
 
 const resolveEventDate = (value?: FirestoreEventRecord["createdAt"]): Date => {
@@ -205,7 +206,7 @@ export async function GET(req: Request) {
         location: safeLocation,
         createdBy: sanitizeText(event.createdBy) || "unknown",
         source: "User" as const,
-        tenantId: event.tenantId || tenantId,
+        tenantId: tenantId,
         createdAt: resolveEventDate(event.createdAt),
       };
     });
