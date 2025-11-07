@@ -47,15 +47,24 @@ type FirestoreTimestampLike = {
   seconds?: number;
 };
 
-type FirestoreEventRecord = {
-  id?: string;
+interface FirestoreEventRecord {
+  id: string;
   title?: string;
   description?: string;
-  tags?: string[];
-  location?: { lat: number; lng: number };
+  date?: string;
+  location?: unknown;
   createdBy?: string;
   createdAt?: Date | string | FirestoreTimestampLike;
+  profileImageUrl?: string;
+  tags?: string[];
   tenantId?: string;
+  [key: string]: unknown;
+}
+
+const logMissingTenant = (eventId: string) => {
+  if (process.env.NODE_ENV === "production") {
+    console.warn(`[WARN] Missing tenantId for event: ${eventId}`);
+  }
 };
 
 const resolveEventDate = (value?: FirestoreEventRecord["createdAt"]): Date => {
@@ -186,22 +195,22 @@ export async function GET(req: Request) {
 
     // Normalize user events to consistent schema
     const normalizedUserEvents: EventResponse[] = filteredUserEvents.map((event, index) => {
-      const eventTenantId =
-        typeof (event as { tenantId?: unknown }).tenantId === "string"
-          ? ((event as { tenantId?: string }).tenantId as string)
-          : undefined;
-
       const safeLocation =
         event.location &&
         typeof event.location === "object" &&
-        typeof event.location.lat === "number" &&
-        typeof event.location.lng === "number"
-          ? event.location
+        typeof (event.location as { lat?: unknown }).lat === "number" &&
+        typeof (event.location as { lng?: unknown }).lng === "number"
+          ? (event.location as { lat: number; lng: number })
           : { lat: 0, lng: 0 };
 
       const tagList = Array.isArray(event.tags)
         ? event.tags.filter((tag): tag is string => typeof tag === "string" && tag.trim().length > 0)
         : [];
+
+      const resolvedTenantId = event.tenantId || tenantId || "defaultTenant";
+      if (!event.tenantId) {
+        logMissingTenant(event.id ?? `unknown-${index}`);
+      }
 
       return {
         id: event.id || `user-${Date.now()}-${index}`,
@@ -211,7 +220,7 @@ export async function GET(req: Request) {
         location: safeLocation,
         createdBy: sanitizeText(event.createdBy) || "unknown",
         source: "User" as const,
-        tenantId: sanitizeText(eventTenantId) || tenantId,
+        tenantId: resolvedTenantId,
         createdAt: resolveEventDate(event.createdAt),
       };
     });
