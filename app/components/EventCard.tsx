@@ -27,9 +27,9 @@ export default function EventCard({
   onUpdate, 
   aiBadgeText = "🤖 AI Event",
   primaryColor = "#3b82f6",
-  aiBadgeColor = "#fef3c7", // yellow-100
-  aiBadgeTextColor = "#92400e", // yellow-800
-  aiBackgroundColor = "#fffbeb", // yellow-50
+  aiBadgeColor = "#ede9fe", // violet-100
+  aiBadgeTextColor = "#4c1d95", // violet-900
+  aiBackgroundColor = "#f5f3ff", // subtle violet
 }: EventCardProps) {
   const { user } = useAuth();
   const [editing, setEditing] = useState(false);
@@ -174,30 +174,31 @@ export default function EventCard({
         </span>
       )}
 
-      <div className="mb-3 flex items-center gap-3">
-        <div className="h-10 w-10 flex-shrink-0">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={avatarUrl || defaultAvatar}
-            alt={displayName}
-            className="h-10 w-10 rounded-full object-cover"
-            loading="lazy"
-            referrerPolicy="no-referrer"
-            onError={(e) => {
-              if (e.currentTarget.src !== defaultAvatar) {
-                setAvatarUrl(defaultAvatar);
-              }
-            }}
-          />
+      {!isAI && (
+        <div className="mb-3 flex items-center gap-3">
+          <div className="h-10 w-10 flex-shrink-0">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={avatarUrl || defaultAvatar}
+              alt={displayName}
+              className="h-10 w-10 rounded-full object-cover"
+              loading="lazy"
+              referrerPolicy="no-referrer"
+              onError={(e) => {
+                if (e.currentTarget.src !== defaultAvatar) {
+                  setAvatarUrl(defaultAvatar);
+                }
+              }}
+            />
+          </div>
+          <div className="flex flex-col leading-tight">
+            <span className="text-sm font-semibold text-gray-900">{displayName}</span>
+            {event.createdAt && (
+              <span className="text-xs text-gray-500">{`Posted ${formatDate(event.createdAt)}`}</span>
+            )}
+          </div>
         </div>
-        <div className="flex flex-col leading-tight">
-          <span className="text-sm font-semibold text-gray-900">{displayName}</span>
-          {!isAI && event.createdAt && (
-            <span className="text-xs text-gray-500">{`Posted ${formatDate(event.createdAt)}`}</span>
-          )}
-          {isAI && <span className="text-xs text-yellow-700 font-medium">Curated by AI</span>}
-        </div>
-      </div>
+      )}
 
       {editing ? (
         <div className="space-y-2">
