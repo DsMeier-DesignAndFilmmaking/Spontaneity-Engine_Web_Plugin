@@ -143,10 +143,10 @@ export default function SpontaneousExperiencePageContent() {
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-xs font-medium uppercase tracking-wide text-blue-600">
-                    Discover events
+                    Feeling Spontaneous?
                   </p>
                   <h2 className="text-xl font-semibold text-gray-900">
-                    Live & AI Hang Outs
+                    Explore Hang Outs and Things To Do
                   </h2>
                   <p className="mt-1 text-xs text-gray-500">
                     Live community hang outs appear first. We add AI inspiration if nothing is nearby yet.

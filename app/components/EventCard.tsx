@@ -177,7 +177,8 @@ export default function EventCard({
       )}
 
       {!isAI && (
-        <div className="mb-3 flex items-center gap-3">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
           <div className="h-10 w-10 flex-shrink-0">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
@@ -199,6 +200,14 @@ export default function EventCard({
               <span className="text-xs text-gray-500">{`Posted ${formatDate(event.createdAt)}`}</span>
             )}
           </div>
+          </div>
+        <button
+          type="button"
+          className="text-xs font-semibold text-blue-600 transition hover:text-blue-700"
+          onClick={() => onNavigate?.(event)}
+        >
+          More Info →
+        </button>
         </div>
       )}
 
@@ -234,32 +243,10 @@ export default function EventCard({
         </div>
       ) : (
         <>
-          <div className="flex justify-between items-start mb-2">
+          <div className="mb-3">
             <h3 className="font-semibold text-lg text-gray-900">{event.title}</h3>
-            {isOwner && !isAI && (
-              <div className="flex gap-2">
-                {(onEdit || onUpdate) && (
-                  <button
-                    onClick={() => setEditing(true)}
-                    className="text-sm font-medium hover:opacity-80 transition-opacity"
-                    style={{ color: primaryColor }}
-                  >
-                    Edit
-                  </button>
-                )}
-                {onDelete && (
-                  <button
-                    onClick={() => onDelete()}
-                    className="text-red-600 hover:text-red-800 text-sm font-medium"
-                  >
-                    Delete
-                  </button>
-                )}
-              </div>
-            )}
+            <p className="text-gray-800 mt-1">{event.description}</p>
           </div>
-
-          <p className="text-gray-800 mb-2">{event.description}</p>
 
           <div className="flex flex-wrap gap-2 mb-2">
             {event.tags?.map((tag: string, idx: number) => (
@@ -272,10 +259,6 @@ export default function EventCard({
             ))}
           </div>
 
-          {isAI && (
-            <div className="text-xs text-gray-700 mt-2">🤖 AI Generated</div>
-          )}
-
           {event.location && typeof event.location.lat === "number" && typeof event.location.lng === "number" && (
             <button
               type="button"
@@ -284,6 +267,27 @@ export default function EventCard({
             >
               Let's Go!
             </button>
+          )}
+
+          {isOwner && !isAI && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {(onEdit || onUpdate) && (
+                <button
+                  onClick={() => setEditing(true)}
+                  className="flex-1 rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-900 transition hover:bg-gray-100"
+                >
+                  Edit
+                </button>
+              )}
+              {onDelete && (
+                <button
+                  onClick={() => onDelete()}
+                  className="flex-1 rounded-lg border border-red-300 px-4 py-2 text-sm font-semibold text-red-600 transition hover:bg-red-50"
+                >
+                  Delete
+                </button>
+              )}
+            </div>
           )}
         </>
       )}

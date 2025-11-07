@@ -38,6 +38,7 @@ export default function MapView({
     origin: null,
     destination: null,
   });
+  const requestedInitialPrompt = useRef(false);
   const [locationPermission, setLocationPermission] = useState<"granted" | "denied" | "prompt" | "checking">("checking");
   const [isLocating, setIsLocating] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
@@ -301,6 +302,25 @@ export default function MapView({
       map.current?.off("styledata", ensureRouteLayer);
     };
   }, [navigationRoute, clearNavigationOverlays]);
+
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      return;
+    }
+
+    if (locationPermission === "prompt" && !requestedInitialPrompt.current) {
+      requestedInitialPrompt.current = true;
+      navigator.geolocation.getCurrentPosition(
+        () => {
+          centerOnUserLocation();
+        },
+        (error) => {
+          console.warn("User dismissed or denied initial location prompt:", error);
+          setLocationError("Location access is required for navigation features.");
+        }
+      );
+    }
+  }, [locationPermission, centerOnUserLocation]);
 
   // Update event markers when events change (API-first: consume API data only)
   useEffect(() => {
