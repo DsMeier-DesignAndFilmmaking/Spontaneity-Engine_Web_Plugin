@@ -913,6 +913,9 @@ export default function EventFeed({
                   aiBadgeColor={aiBadgeColor}
                   aiBadgeTextColor={aiBadgeTextColor}
                   aiBackgroundColor={aiBackgroundColor}
+                  onMoreInfo={() =>
+                    showNotification("success", "Detailed hang out view coming soon!")
+                  }
                   onNavigate={handleNavigate}
                   onUpdate={
                     event.id &&
