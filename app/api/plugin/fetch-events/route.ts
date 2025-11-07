@@ -42,24 +42,8 @@ interface EventResponse {
   createdAt?: string | Date;
 }
 
-type FirestoreTimestampLike = {
-  toDate?: () => Date;
-  seconds?: number;
-};
-
-interface FirestoreEventRecord {
-  id: string;
-  title?: string;
-  description?: string;
-  date?: string;
-  location?: unknown;
-  createdBy?: string;
-  createdAt?: Date | string | FirestoreTimestampLike;
-  profileImageUrl?: string;
-  tags?: string[];
-  tenantId?: string;
-  [key: string]: unknown;
-}
+import type { FirestoreEventRecord } from "@/types/firestore";
+import type { FirestoreTimestampLike } from "@/types/firestore";
 
 const logMissingTenant = (eventId: string) => {
   if (process.env.NODE_ENV === "production") {
