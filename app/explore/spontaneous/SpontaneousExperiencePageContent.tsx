@@ -172,7 +172,21 @@ export default function SpontaneousExperiencePageContent() {
             transition={{ duration: 0.2, ease: "easeOut" }}
           >
             <header className="sticky top-0 z-10 border-b border-gray-200 bg-white/95 px-5 pb-3 pt-24 md:pt-20 backdrop-blur">
-              <div className="flex items-start justify-between gap-4">
+              <div className="flex flex-col gap-4">
+                <div className="flex justify-start">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPanelOpen(false);
+                      setDetailEvent(null);
+                      setIsDetailOpen(false);
+                    }}
+                    className="inline-flex items-center justify-center rounded-full bg-white/95 p-3 text-gray-900 shadow-lg backdrop-blur transition hover:bg-white"
+                    aria-label="Close panel"
+                  >
+                    ×
+                  </button>
+                </div>
                 <div>
                   <p className="text-xs font-medium uppercase tracking-wide text-blue-600">
                     Feeling Spontaneous?
@@ -184,18 +198,6 @@ export default function SpontaneousExperiencePageContent() {
                     Live and upcoming community hang outs based on real-time information, such as weather, time and your saved and learned preferences.
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPanelOpen(false);
-                    setDetailEvent(null);
-                    setIsDetailOpen(false);
-                  }}
-                  className="inline-flex items-center justify-center rounded-full bg-white/95 p-3 text-gray-900 shadow-lg backdrop-blur transition hover:bg-white"
-                  aria-label="Close panel"
-                >
-                  ×
-                </button>
               </div>
             </header>
 
