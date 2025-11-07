@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 
 import MapView from "@/app/components/MapView";
 import EventFeed from "@/app/components/EventFeed";
+import EventDetailPanel from "@/app/components/EventDetailPanel";
 import { Event } from "@/lib/types";
 import type { NavigationRoutePayload } from "@/lib/mapbox";
 
@@ -20,6 +21,7 @@ export default function SpontaneousExperiencePageContent() {
   const [hasLoaded, setHasLoaded] = useState(false);
   const [selectedEventId, setSelectedEventId] = useState<string | undefined>();
   const [panelOpen, setPanelOpen] = useState(false);
+  const [detailEvent, setDetailEvent] = useState<Event | null>(null);
   const [activeRoute, setActiveRoute] = useState<NavigationRoutePayload | null>(null);
 
   const handleBack = useCallback(() => {
@@ -34,6 +36,15 @@ export default function SpontaneousExperiencePageContent() {
     setEvents(incoming);
     setHasLoaded(true);
   }, []);
+
+  const handleMoreInfo = useCallback(
+    (event: Event) => {
+      setDetailEvent(event);
+      setSelectedEventId(event.id);
+      setPanelOpen(true);
+    },
+    []
+  );
 
   const hasOnlyAIEvents = useMemo(
     () =>
@@ -64,7 +75,10 @@ export default function SpontaneousExperiencePageContent() {
             selectedEventId={selectedEventId}
             onEventClick={(event) => setSelectedEventId(event.id)}
             navigationRoute={activeRoute}
-            onClearNavigation={() => setActiveRoute(null)}
+            onClearNavigation={() => {
+              setActiveRoute(null);
+              setDetailEvent(null);
+            }}
           />
 
           <motion.button
@@ -154,7 +168,10 @@ export default function SpontaneousExperiencePageContent() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => setPanelOpen(false)}
+                  onClick={() => {
+                    setPanelOpen(false);
+                    setDetailEvent(null);
+                  }}
                   className="flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 text-gray-500 transition hover:border-gray-300 hover:text-gray-700"
                   aria-label="Close panel"
                 >
@@ -163,23 +180,49 @@ export default function SpontaneousExperiencePageContent() {
               </div>
             </header>
 
-            <div className="flex-1 overflow-y-auto px-4 pb-6 pt-4">
-              <EventFeed
-                onEventsChange={handleEventsChange}
-                onNavigationRouteChange={setActiveRoute}
-                defaultApiKey={apiKey}
-                defaultTenantId={tenantId}
-                showTestingControls={false}
-                showAIEvents
-                enableSorting={false}
-                defaultSortBy="newest"
-                eventLabel="Hang Out"
-                aiBadgeText="🤖 AI Inspiration"
-                cacheDuration={5}
-                pollingInterval={45}
-              />
+            <div
+              className={`flex-1 overflow-hidden ${detailEvent ? "md:grid md:grid-cols-[minmax(0,0.65fr)_minmax(0,0.35fr)]" : ""}`}
+            >
+              <div
+                className={`overflow-y-auto px-4 pb-6 pt-4 ${detailEvent ? "border-b border-gray-200 md:border-b-0 md:border-r" : ""}`}
+              >
+                <EventFeed
+                  onEventsChange={handleEventsChange}
+                  onNavigationRouteChange={setActiveRoute}
+                  onMoreInfo={handleMoreInfo}
+                  defaultApiKey={apiKey}
+                  defaultTenantId={tenantId}
+                  showTestingControls={false}
+                  showAIEvents
+                  enableSorting={false}
+                  defaultSortBy="newest"
+                  eventLabel="Hang Out"
+                  aiBadgeText="🤖 AI Inspiration"
+                  cacheDuration={5}
+                  pollingInterval={45}
+                />
+              </div>
+
+              {detailEvent && (
+                <div className="hidden h-full overflow-y-auto md:block">
+                  <EventDetailPanel
+                    event={detailEvent}
+                    onClose={() => setDetailEvent(null)}
+                  />
+                </div>
+              )}
             </div>
           </motion.aside>
+        )}
+        {panelOpen && detailEvent && (
+          <div className="pointer-events-none absolute inset-y-0 right-0 z-20 flex w-full max-w-sm flex-col bg-transparent md:hidden">
+            <div className="pointer-events-auto"> 
+              <EventDetailPanel
+                event={detailEvent}
+                onClose={() => setDetailEvent(null)}
+              />
+            </div>
+          </div>
         )}
       </motion.div>
     </AnimatePresence>

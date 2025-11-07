@@ -69,6 +69,7 @@ interface EventFeedProps {
   aiBadgeTextColor?: string; // Text color for AI badge
   aiBackgroundColor?: string; // Background color for AI event cards
   onNavigationRouteChange?: (payload: NavigationRoutePayload | null) => void;
+  onMoreInfo?: (event: Event) => void;
 }
 
 const EARTH_RADIUS_METERS = 6_371_000;
@@ -124,6 +125,7 @@ export default function EventFeed({
   aiBadgeTextColor = "#92400e",
   aiBackgroundColor = "#f5f3ff",
   onNavigationRouteChange = () => undefined,
+  onMoreInfo,
 }: EventFeedProps) {
   const { user, loading: authLoading } = useAuth();
   const [showForm, setShowForm] = useState(false);
@@ -904,43 +906,45 @@ export default function EventFeed({
       {combinedEvents.length === 0 ? (
         <p className="text-gray-800">No hang outs found. Be the first to create one!</p>
       ) : (
-            combinedEvents.map((event) => (
-              <div key={event.id} id={`event-${event.id}`}>
-                <EventCard
-                  event={event}
-                  aiBadgeText={aiBadgeText}
-                  primaryColor={primaryColor}
-                  aiBadgeColor={aiBadgeColor}
-                  aiBadgeTextColor={aiBadgeTextColor}
-                  aiBackgroundColor={aiBackgroundColor}
-                  onMoreInfo={() =>
-                    showNotification("success", "Detailed hang out view coming soon!")
-                  }
-                  onNavigate={handleNavigate}
-                  onUpdate={
-                    event.id &&
-                    !event.id.startsWith("AI-") &&
-                    event.createdBy !== "ai" &&
-                    event.createdBy === user?.uid
-                      ? (updates: Partial<Event>) => {
-                          if (event.id) {
-                            handleUpdate(event.id, updates, event.createdBy);
-                          }
-                        }
-                      : undefined
-                  }
-                  onDelete={
-                    event.id && !event.id.startsWith("AI-") && event.createdBy !== "ai"
-                      ? () => {
-                          if (event.id) {
-                            handleDelete(event.id, event.createdBy);
-                          }
-                        }
-                      : undefined
-                  }
-                />
-              </div>
-            ))
+        combinedEvents.map((event, index) => (
+          <div
+            key={event.id}
+            id={`event-${event.id}`}
+            className={index === combinedEvents.length - 1 ? "" : "mb-5"}
+          >
+            <EventCard
+              event={event}
+              aiBadgeText={aiBadgeText}
+              primaryColor={primaryColor}
+              aiBadgeColor={aiBadgeColor}
+              aiBadgeTextColor={aiBadgeTextColor}
+              aiBackgroundColor={aiBackgroundColor}
+              onMoreInfo={onMoreInfo}
+              onNavigate={handleNavigate}
+              onUpdate={
+                event.id &&
+                !event.id.startsWith("AI-") &&
+                event.createdBy !== "ai" &&
+                event.createdBy === user?.uid
+                  ? (updates: Partial<Event>) => {
+                      if (event.id) {
+                        handleUpdate(event.id, updates, event.createdBy);
+                      }
+                    }
+                  : undefined
+              }
+              onDelete={
+                event.id && !event.id.startsWith("AI-") && event.createdBy !== "ai"
+                  ? () => {
+                      if (event.id) {
+                        handleDelete(event.id, event.createdBy);
+                      }
+                    }
+                  : undefined
+              }
+            />
+          </div>
+        ))
       )}
 
       {navigationLoading && (

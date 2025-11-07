@@ -196,7 +196,7 @@ export default function EventCard({
   return (
     <div
       className={`relative rounded-2xl p-4 shadow transition hover:shadow-md ${
-        isAI ? "border border-yellow-300" : "bg-white"
+        isAI ? "border border-yellow-300" : "border border-gray-200 bg-white"
       }`}
       style={isAI ? { backgroundColor: aiBackgroundColor } : {}}
     >
@@ -250,7 +250,7 @@ export default function EventCard({
         </div>
       )}
 
-      {renderAvatarBlock()}
+      {!isAI && renderAvatarBlock()}
 
       <div className="mb-3">
         <h3 className="text-lg font-semibold text-gray-900">{event.title}</h3>
