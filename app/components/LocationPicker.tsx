@@ -24,6 +24,31 @@ export default function LocationPicker({
     lng: number;
   } | null>(initialLocation || null);
 
+  const createMarkerElement = () => {
+    const el = document.createElement("div");
+    el.className = "location-picker-marker";
+    el.style.width = "32px";
+    el.style.height = "32px";
+    el.style.borderRadius = "50%";
+    el.style.backgroundColor = "#3b82f6";
+    el.style.border = "4px solid white";
+    el.style.boxShadow = "0 2px 8px rgba(0,0,0,0.3)";
+    el.style.cursor = "pointer";
+    return el;
+  };
+
+  const placeMarker = (lng: number, lat: number) => {
+    if (!map.current) {
+      return;
+    }
+    if (marker.current) {
+      marker.current.remove();
+    }
+    marker.current = new mapboxgl.Marker(createMarkerElement())
+      .setLngLat([lng, lat])
+      .addTo(map.current);
+  };
+
   // Initialize map
   useEffect(() => {
     if (map.current) return;
@@ -42,19 +67,7 @@ export default function LocationPicker({
 
     // Add initial marker if location provided
     if (initialLocation) {
-      const el = document.createElement("div");
-      el.className = "location-picker-marker";
-      el.style.width = "32px";
-      el.style.height = "32px";
-      el.style.borderRadius = "50%";
-      el.style.backgroundColor = "#3b82f6";
-      el.style.border = "4px solid white";
-      el.style.boxShadow = "0 2px 8px rgba(0,0,0,0.3)";
-      el.style.cursor = "pointer";
-
-      marker.current = new mapboxgl.Marker(el)
-        .setLngLat([initialLocation.lng, initialLocation.lat])
-        .addTo(map.current);
+      placeMarker(initialLocation.lng, initialLocation.lat);
     }
 
     // Handle map click to set location
@@ -62,26 +75,7 @@ export default function LocationPicker({
     currentMap.on("click", (e) => {
       const { lng, lat } = e.lngLat;
       setSelectedLocation({ lat, lng });
-
-      // Remove existing marker
-      if (marker.current) {
-        marker.current.remove();
-      }
-
-      // Create new marker at clicked location
-      const el = document.createElement("div");
-      el.className = "location-picker-marker";
-      el.style.width = "32px";
-      el.style.height = "32px";
-      el.style.borderRadius = "50%";
-      el.style.backgroundColor = "#3b82f6";
-      el.style.border = "4px solid white";
-      el.style.boxShadow = "0 2px 8px rgba(0,0,0,0.3)";
-      el.style.cursor = "pointer";
-
-      marker.current = new mapboxgl.Marker(el)
-        .setLngLat([lng, lat])
-        .addTo(currentMap);
+      placeMarker(lng, lat);
     });
 
     // Resize map when window size changes
@@ -97,6 +91,42 @@ export default function LocationPicker({
       if (map.current) {
         map.current.remove();
       }
+    };
+  }, [initialLocation]);
+
+  useEffect(() => {
+    if (initialLocation || typeof window === "undefined" || !navigator.geolocation) {
+      return;
+    }
+
+    let cancelled = false;
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        if (cancelled) {
+          return;
+        }
+        const coords = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        };
+        setSelectedLocation(coords);
+        if (map.current) {
+          map.current.flyTo({ center: [coords.lng, coords.lat], zoom: 13 });
+          placeMarker(coords.lng, coords.lat);
+        }
+      },
+      (geoError) => {
+        console.warn("LocationPicker geolocation unavailable, using fallback center:", geoError);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 300000,
+      }
+    );
+
+    return () => {
+      cancelled = true;
     };
   }, [initialLocation]);
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useAuth } from "./AuthContext";
 import { EventFormData } from "@/lib/types";
@@ -54,6 +54,38 @@ export default function EventForm({
   });
 
   const location = watch("location");
+
+  useEffect(() => {
+    if (event || typeof window === "undefined" || !navigator.geolocation) {
+      return;
+    }
+
+    let cancelled = false;
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        if (cancelled) {
+          return;
+        }
+        const coords = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        };
+        setValue("location", coords, { shouldValidate: true });
+      },
+      (geoError) => {
+        console.warn("EventForm geolocation unavailable, keeping default location:", geoError);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 300000,
+      }
+    );
+
+    return () => {
+      cancelled = true;
+    };
+  }, [event, setValue]);
 
   const handleLocationSelect = (selectedLocation: { lat: number; lng: number }) => {
     setValue("location", selectedLocation, { shouldValidate: true });
