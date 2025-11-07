@@ -45,10 +45,10 @@ interface EventResponse {
 import type { FirestoreEventRecord } from "@/types/firestore";
 import type { FirestoreTimestampLike } from "@/types/firestore";
 
-const logMissingTenant = (eventId: string) => {
-  if (process.env.NODE_ENV === "production") {
-    console.warn(`[WARN] Missing tenantId for event: ${eventId}`);
-  }
+const logMissingTenant = (eventTitle: string, eventId: string) => {
+  console.warn(
+    `[Firestore Warning] Missing tenantId for event "${eventTitle}" (id: ${eventId}). Using fallback.`
+  );
 };
 
 const resolveEventDate = (value?: FirestoreEventRecord["createdAt"]): Date => {
@@ -180,8 +180,8 @@ export async function GET(req: Request) {
     // Normalize user events to consistent schema
     const normalizedUserEvents: EventResponse[] = filteredUserEvents.map((event, index) => {
       const eventTenantId =
-        typeof (event as { tenantId?: unknown }).tenantId === "string"
-          ? ((event as { tenantId: string }).tenantId)
+        typeof event.tenantId === "string" && event.tenantId.trim().length > 0
+          ? event.tenantId.trim()
           : undefined;
 
       const safeLocation =
@@ -196,9 +196,9 @@ export async function GET(req: Request) {
         ? event.tags.filter((tag): tag is string => typeof tag === "string" && tag.trim().length > 0)
         : [];
 
-      const resolvedTenantId = eventTenantId || tenantId || "defaultTenant";
+      const resolvedTenantId = eventTenantId ?? tenantId ?? "defaultTenant";
       if (!eventTenantId) {
-        logMissingTenant(event.id ?? `unknown-${index}`);
+        logMissingTenant(event.title || `Event ${index + 1}`, event.id ?? `unknown-${index}`);
       }
 
       return {
