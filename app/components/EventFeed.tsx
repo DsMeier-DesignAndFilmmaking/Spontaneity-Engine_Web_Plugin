@@ -25,6 +25,14 @@ interface SubmitEventPayload extends EventFormData {
   userId: string;
   apiKey?: string;
   tenantId?: string;
+  consentGiven?: boolean;
+  creator?: {
+    uid: string;
+    name?: string;
+    profileImageUrl?: string;
+  };
+  creatorName?: string;
+  creatorProfileImageUrl?: string;
 }
 
 interface UpdateEventPayload {

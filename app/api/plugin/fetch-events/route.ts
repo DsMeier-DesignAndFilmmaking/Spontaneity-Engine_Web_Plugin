@@ -51,7 +51,7 @@ const logMissingTenant = (eventTitle: string, eventId: string) => {
   );
 };
 
-const resolveEventDate = (value?: FirestoreEventRecord["createdAt"]): Date => {
+const resolveEventDate = (value?: unknown): Date => {
   if (value instanceof Date) {
     return value;
   }
@@ -277,7 +277,7 @@ export async function GET(req: Request) {
                   createdBy: suggestion.createdBy || "ai",
                   source: "AI" as const,
                   tenantId: suggestion.tenantId || tenantId,
-                  createdAt: suggestion.createdAt || new Date(),
+                  createdAt: resolveEventDate(suggestion.createdAt),
                 }));
                 // Cache it per tenant with metadata
                 aiEventCache.set(cacheKey, { 

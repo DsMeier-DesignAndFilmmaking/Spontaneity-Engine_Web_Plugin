@@ -83,7 +83,7 @@ export async function generateLocalAISuggestions({
 
   if (!apiKey) {
     console.warn("OpenAI API key not configured. Falling back to static AI suggestions.");
-    return mapSuggestionsToEvents(FALLBACK_SUGGESTIONS, coordinates || FALLBACK_COORDS, tenantId, city || location);
+    return mapSuggestionsToEvents(FALLBACK_SUGGESTIONS, coordinates || FALLBACK_COORDS, tenantId);
   }
 
   const openai = new OpenAI({ apiKey });
@@ -230,7 +230,7 @@ function mapSuggestionsToEvents(
       createdBy: "ai",
       createdAt: new Date(),
       source: "AI" as const,
-      tenantId,
+      tenantId: tenantId ?? undefined,
       creator: {
         uid: "ai",
         name: "AI Concierge",

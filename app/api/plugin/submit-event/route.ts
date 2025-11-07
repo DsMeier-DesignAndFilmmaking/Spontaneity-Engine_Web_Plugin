@@ -130,8 +130,9 @@ export async function POST(req: Request) {
 
     console.log("Calling submitEvent with:", { tenantId, hasTitle: !!event.title });
     const result = await submitEvent(event, tenantId);
-    console.log("submitEvent succeeded:", { id: result.id });
-    return NextResponse.json({ success: true, id: result.id, ...result });
+    const { id, ...rest } = result ?? {};
+    console.log("submitEvent succeeded:", { id });
+    return NextResponse.json({ success: true, id, ...rest });
   } catch (err) {
     console.error("=== SUBMIT EVENT ERROR ===");
     console.error("Error type:", typeof err);
