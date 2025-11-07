@@ -16,6 +16,17 @@ interface HangoutDocData {
   tenantId?: unknown;
   consentGiven?: unknown;
   anonymizedUserId?: unknown;
+  creator?: {
+    uid?: unknown;
+    name?: unknown;
+    profileImageUrl?: unknown;
+  } | null;
+  creatorName?: unknown;
+  creatorProfileImageUrl?: unknown;
+  createdByName?: unknown;
+  profileImageUrl?: unknown;
+  displayName?: unknown;
+  name?: unknown;
 }
 
 const DEFAULT_LOCATION = { lat: 0, lng: 0 };
@@ -65,18 +76,50 @@ function normalizeLocation(location: unknown) {
 }
 
 export function mapHangoutDocument(docData: HangoutDocData = {}, docId: string): Event {
+  const sanitizeString = (value: unknown): string | undefined => {
+    if (typeof value !== "string") {
+      return undefined;
+    }
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  };
+
+  const DEFAULT_AVATAR = "/default-profile.png";
+  const creatorUid =
+    sanitizeString(docData.creator?.uid) ||
+    sanitizeString(docData.createdBy) ||
+    "unknown";
+  const creatorName =
+    sanitizeString(docData.creator?.name) ||
+    sanitizeString(docData.creatorName) ||
+    sanitizeString(docData.createdByName) ||
+    sanitizeString(docData.displayName) ||
+    sanitizeString(docData.name) ||
+    (creatorUid !== "unknown" && !creatorUid.startsWith("AI-") ? creatorUid : undefined) ||
+    "Anonymous";
+  const creatorProfileImageUrl =
+    sanitizeString(docData.creator?.profileImageUrl) ||
+    sanitizeString(docData.creatorProfileImageUrl) ||
+    sanitizeString(docData.profileImageUrl) ||
+    DEFAULT_AVATAR;
+
   return {
     id: docId,
     title: typeof docData.title === "string" ? docData.title : "",
     description: typeof docData.description === "string" ? docData.description : "",
     tags: Array.isArray(docData.tags) ? (docData.tags as string[]) : [],
     location: normalizeLocation(docData.location),
-    createdBy: typeof docData.createdBy === "string" ? docData.createdBy : "unknown",
+    createdBy: typeof docData.createdBy === "string" ? docData.createdBy : creatorUid,
     createdAt: resolveCreatedAt(docData.createdAt),
     source: docData.source === "AI" ? "AI" : "User",
     tenantId: typeof docData.tenantId === "string" ? docData.tenantId : undefined,
     consentGiven: typeof docData.consentGiven === "boolean" ? docData.consentGiven : true,
     anonymizedUserId: typeof docData.anonymizedUserId === "string" ? docData.anonymizedUserId : undefined,
+    creator: {
+      uid: creatorUid,
+      name: creatorName,
+      profileImageUrl: creatorProfileImageUrl,
+    },
   };
 }
 
