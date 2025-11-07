@@ -87,7 +87,7 @@ export default function EventFeed({
   primaryColor = "#3b82f6",
   aiBadgeColor = "#fef3c7",
   aiBadgeTextColor = "#92400e",
-  aiBackgroundColor = "#fffbeb",
+  aiBackgroundColor = "#f5f3ff",
 }: EventFeedProps) {
   const { user, loading: authLoading } = useAuth();
   const [showForm, setShowForm] = useState(false);
