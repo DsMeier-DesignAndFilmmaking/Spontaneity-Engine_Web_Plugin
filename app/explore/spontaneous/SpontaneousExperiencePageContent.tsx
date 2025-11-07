@@ -200,10 +200,10 @@ export default function SpontaneousExperiencePageContent() {
             </header>
 
             <div
-              className={`flex-1 overflow-hidden ${detailEvent ? "md:grid md:grid-cols-[minmax(0,0.65fr)_minmax(0,0.35fr)]" : ""}`}
+              className="flex-1 overflow-hidden"
             >
               <div
-                className={`flex h-full flex-col ${detailEvent ? "border-b border-gray-200 md:border-b-0 md:border-r" : ""}`}
+                className="flex h-full flex-col"
               >
                 <div className="flex-1 overflow-y-auto px-4 pb-6 pt-4">
                   <EventFeed
@@ -223,25 +223,13 @@ export default function SpontaneousExperiencePageContent() {
                   />
                 </div>
               </div>
-
-              {detailEvent && (
-                <div className="hidden h-full overflow-y-auto md:block">
-                  <EventDetailPanel
-                    event={detailEvent}
-                    onClose={() => {
-                      setDetailEvent(null);
-                      setIsDetailOpen(false);
-                    }}
-                  />
-                </div>
-              )}
             </div>
           </motion.aside>
         )}
         {isDetailOpen && detailEvent && (
           <motion.aside
             key="detail-panel"
-            className="pointer-events-auto absolute inset-y-0 left-0 z-30 flex w-full max-w-sm flex-col bg-white shadow-2xl md:max-w-md"
+            className="pointer-events-auto absolute inset-y-0 left-0 z-30 flex w-full max-w-sm flex-col bg-white shadow-2xl md:left-[min(24rem,60vw)] md:max-w-md"
             initial={{ x: "-100%", opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: "-100%", opacity: 0 }}
