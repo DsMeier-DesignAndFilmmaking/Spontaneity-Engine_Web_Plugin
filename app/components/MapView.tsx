@@ -453,7 +453,7 @@ export default function MapView({
       )}
 
       {navigationRoute && activeSteps.length > 0 && (
-        <div className="pointer-events-auto absolute left-4 top-4 z-40 max-h-[75vh] w-72 overflow-hidden rounded-2xl bg-white/95 shadow-2xl backdrop-blur">
+        <div className="pointer-events-auto absolute left-4 top-24 z-40 max-h-[70vh] w-72 overflow-hidden rounded-2xl bg-white/95 shadow-2xl backdrop-blur">
           <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
             <div>
               <p className="text-xs font-medium uppercase text-blue-600">Walking Directions</p>

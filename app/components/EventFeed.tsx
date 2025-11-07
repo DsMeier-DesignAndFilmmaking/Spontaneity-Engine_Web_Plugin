@@ -92,6 +92,17 @@ const haversineDistanceMeters = (
   return EARTH_RADIUS_METERS * c;
 };
 
+const asNumber = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
 export default function EventFeed({
   onEventsChange,
   defaultApiKey,
@@ -286,12 +297,19 @@ export default function EventFeed({
 
   const handleNavigate = useCallback(
     (target: Event) => {
-      if (
-        !target.location ||
-        typeof target.location.lat !== "number" ||
-        typeof target.location.lng !== "number"
-      ) {
+      if (!target.location) {
         showNotification("error", "This hang out does not have a valid location yet.");
+        return;
+      }
+
+      const normalizedLat = asNumber((target.location as { lat: unknown }).lat);
+      const normalizedLng = asNumber((target.location as { lng: unknown }).lng);
+
+      if (normalizedLat === null || normalizedLng === null) {
+        showNotification(
+          "error",
+          "This hang out is missing valid coordinates. Please update its location and try again."
+        );
         return;
       }
 
@@ -310,8 +328,8 @@ export default function EventFeed({
               lng: position.coords.longitude,
             };
             const destinationCoords = {
-              lat: target.location!.lat,
-              lng: target.location!.lng,
+              lat: normalizedLat,
+              lng: normalizedLng,
               name: target.title,
             };
 
