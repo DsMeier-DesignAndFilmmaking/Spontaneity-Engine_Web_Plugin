@@ -8,6 +8,10 @@ import { useAuth } from "./AuthContext";
 import { Event, EventFormData } from "@/lib/types";
 import { getCurrentLocation } from "@/lib/hooks/useGeolocation";
 import { useHangoutsFeed } from "@/lib/hooks/useHangoutsFeed";
+import Loader from "./Loader";
+import NavigationModal from "./NavigationModal";
+import { getWalkingRoute, type DirectionsStep } from "@/lib/mapbox";
+import type { Feature, LineString } from "geojson";
 
 interface ApiResponse {
   events: Event[];
@@ -114,6 +118,18 @@ export default function EventFeed({
   const [apiKey, setApiKey] = useState(defaultApiKey || "");
   const [tenantId, setTenantId] = useState(defaultTenantId || "");
   const [useApiKey, setUseApiKey] = useState(!!defaultApiKey);
+
+  const [navigationLoading, setNavigationLoading] = useState(false);
+  const [navigationState, setNavigationState] = useState<
+    | null
+    | {
+        routeFeature: Feature<LineString>;
+        steps: DirectionsStep[];
+        origin: { lat: number; lng: number };
+        destination: { lat: number; lng: number; name?: string };
+        title?: string;
+      }
+  >(null);
   
   const { hangouts, loading: hangoutsLoading, error: hangoutsError } = useHangoutsFeed({
     tenantId: useApiKey ? undefined : tenantId || undefined,
@@ -257,6 +273,84 @@ export default function EventFeed({
     setNotification({ type, message });
     setTimeout(() => setNotification(null), 5000);
   };
+
+  const handleNavigate = useCallback(
+    (target: Event) => {
+      if (
+        !target.location ||
+        typeof target.location.lat !== "number" ||
+        typeof target.location.lng !== "number"
+      ) {
+        showNotification("error", "This hang out does not have a valid location yet.");
+        return;
+      }
+
+      if (typeof navigator === "undefined" || !navigator.geolocation) {
+        showNotification("error", "Geolocation is not supported in this browser.");
+        return;
+      }
+
+      setNavigationLoading(true);
+      navigator.geolocation.getCurrentPosition(
+        async (position) => {
+          try {
+            const originCoords = {
+              lat: position.coords.latitude,
+              lng: position.coords.longitude,
+            };
+            const destinationCoords = {
+              lat: target.location!.lat,
+              lng: target.location!.lng,
+              name: target.title,
+            };
+
+            const route = await getWalkingRoute(originCoords, destinationCoords);
+
+            setNavigationState({
+              routeFeature: route.feature,
+              steps: route.steps,
+              origin: originCoords,
+              destination: destinationCoords,
+              title: target.title,
+            });
+          } catch (error) {
+            console.error("Navigation route error", error);
+            const message =
+              error instanceof Error ? error.message : "Unable to calculate walking route.";
+            showNotification("error", message);
+          } finally {
+            setNavigationLoading(false);
+          }
+        },
+        (geoError) => {
+          console.warn("Geolocation error", geoError);
+          setNavigationLoading(false);
+          switch (geoError.code) {
+            case geoError.PERMISSION_DENIED:
+              showNotification(
+                "error",
+                "Location permission denied. Please enable location access and try again."
+              );
+              break;
+            case geoError.POSITION_UNAVAILABLE:
+              showNotification("error", "We couldn't determine your position. Please try again.");
+              break;
+            case geoError.TIMEOUT:
+              showNotification("error", "Locating you took too long. Please retry.");
+              break;
+            default:
+              showNotification("error", "Unexpected geolocation error occurred.");
+          }
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 300000,
+        }
+      );
+    },
+    [showNotification]
+  );
 
   // Build API query string
   const buildQueryString = useCallback(() => {
@@ -776,6 +870,7 @@ export default function EventFeed({
                   aiBadgeColor={aiBadgeColor}
                   aiBadgeTextColor={aiBadgeTextColor}
                   aiBackgroundColor={aiBackgroundColor}
+                  onNavigate={handleNavigate}
                   onUpdate={
                     event.id &&
                     !event.id.startsWith("AI-") &&
@@ -800,6 +895,26 @@ export default function EventFeed({
                 />
               </div>
             ))
+      )}
+
+      {navigationLoading && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="rounded-2xl bg-white px-6 py-4 shadow-xl">
+            <Loader />
+            <p className="mt-2 text-sm font-medium text-gray-700">Calculating walking route…</p>
+          </div>
+        </div>
+      )}
+
+      {navigationState && (
+        <NavigationModal
+          routeFeature={navigationState.routeFeature}
+          origin={navigationState.origin}
+          destination={navigationState.destination}
+          steps={navigationState.steps}
+          title={navigationState.title}
+          onClose={() => setNavigationState(null)}
+        />
       )}
     </div>
   );

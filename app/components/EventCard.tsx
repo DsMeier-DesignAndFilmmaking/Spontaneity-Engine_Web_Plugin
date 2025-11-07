@@ -12,6 +12,7 @@ interface EventCardProps {
   onEdit?: (event: Event) => void;
   onDelete?: () => void;
   onUpdate?: (updates: Partial<Event>) => void;
+  onNavigate?: (event: Event) => void;
   aiBadgeText?: string;
   // Theme customization
   primaryColor?: string; // For edit/delete buttons
@@ -25,6 +26,7 @@ export default function EventCard({
   onEdit, 
   onDelete, 
   onUpdate, 
+  onNavigate,
   aiBadgeText = "🤖 AI Event",
   primaryColor = "#3b82f6",
   aiBadgeColor = "#ede9fe", // violet-100
@@ -272,6 +274,16 @@ export default function EventCard({
 
           {isAI && (
             <div className="text-xs text-gray-700 mt-2">🤖 AI Generated</div>
+          )}
+
+          {event.location && typeof event.location.lat === "number" && typeof event.location.lng === "number" && (
+            <button
+              type="button"
+              onClick={() => onNavigate?.(event)}
+              className="mt-3 w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700"
+            >
+              Let's Go!
+            </button>
           )}
         </>
       )}
