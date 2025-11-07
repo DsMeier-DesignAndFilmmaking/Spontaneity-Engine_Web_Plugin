@@ -95,7 +95,10 @@ export default function SpontaneousExperiencePageContent() {
           {!panelOpen && (
             <motion.button
               type="button"
-              onClick={() => setPanelOpen(true)}
+              onClick={() => {
+                setPanelOpen(true);
+                setDetailEvent(null);
+              }}
               className="pointer-events-auto absolute bottom-32 right-4 md:bottom-24 md:right-6 z-40 flex items-center gap-2 rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-lg transition hover:bg-blue-700"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -163,7 +166,7 @@ export default function SpontaneousExperiencePageContent() {
                     Explore Hang Outs and Things To Do
                   </h2>
                   <p className="mt-1 text-xs text-gray-500">
-                    Live community hang outs appear first. We add AI inspiration if nothing is nearby yet.
+                    Live and upcoming community hang outs based on real-time information, such as weather, time and your saved and learned preferences.
                   </p>
                 </div>
                 <button
@@ -184,23 +187,25 @@ export default function SpontaneousExperiencePageContent() {
               className={`flex-1 overflow-hidden ${detailEvent ? "md:grid md:grid-cols-[minmax(0,0.65fr)_minmax(0,0.35fr)]" : ""}`}
             >
               <div
-                className={`overflow-y-auto px-4 pb-6 pt-4 ${detailEvent ? "border-b border-gray-200 md:border-b-0 md:border-r" : ""}`}
+                className={`flex h-full flex-col ${detailEvent ? "border-b border-gray-200 md:border-b-0 md:border-r" : ""}`}
               >
-                <EventFeed
-                  onEventsChange={handleEventsChange}
-                  onNavigationRouteChange={setActiveRoute}
-                  onMoreInfo={handleMoreInfo}
-                  defaultApiKey={apiKey}
-                  defaultTenantId={tenantId}
-                  showTestingControls={false}
-                  showAIEvents
-                  enableSorting={false}
-                  defaultSortBy="newest"
-                  eventLabel="Hang Out"
-                  aiBadgeText="🤖 AI Inspiration"
-                  cacheDuration={5}
-                  pollingInterval={45}
-                />
+                <div className="flex-1 overflow-y-auto px-4 pb-6 pt-4">
+                  <EventFeed
+                    onEventsChange={handleEventsChange}
+                    onNavigationRouteChange={setActiveRoute}
+                    onMoreInfo={handleMoreInfo}
+                    defaultApiKey={apiKey}
+                    defaultTenantId={tenantId}
+                    showTestingControls={false}
+                    showAIEvents
+                    enableSorting={false}
+                    defaultSortBy="newest"
+                    eventLabel="Hang Out"
+                    aiBadgeText="🤖 AI Inspiration"
+                    cacheDuration={5}
+                    pollingInterval={45}
+                  />
+                </div>
               </div>
 
               {detailEvent && (
