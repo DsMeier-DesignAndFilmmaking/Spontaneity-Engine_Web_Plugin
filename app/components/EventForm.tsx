@@ -13,6 +13,7 @@ interface EventFormProps {
     description: string;
     tags: string[];
     location: { lat: number; lng: number };
+    startTime?: string;
   };
   onSubmit: (data: EventFormData) => Promise<void>;
   onCancel: () => void;
@@ -23,20 +24,36 @@ interface EventFormProps {
   primaryColor?: string; // For submit button
 }
 
-export default function EventForm({ 
-  event, 
-  onSubmit, 
+const deriveTimeInputValue = (value?: string) => {
+  if (!value) {
+    return "18:00";
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.valueOf())) {
+    return "18:00";
+  }
+
+  const hours = parsed.getHours().toString().padStart(2, "0");
+  const minutes = parsed.getMinutes().toString().padStart(2, "0");
+  return `${hours}:${minutes}`;
+};
+
+export default function EventForm({
+  event,
+  onSubmit,
   onCancel,
   apiBaseUrl = "",
   submitEventEndpoint = "/api/plugin/submit-event",
-  eventLabel = "Hang Out",
-  primaryColor = "#3b82f6",
+  eventLabel = "Event",
+  primaryColor = "#2563eb",
 }: EventFormProps) {
   const { user } = useAuth();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
   const [consentGiven, setConsentGiven] = useState(false); // GDPR consent flag
+  const [startTime, setStartTime] = useState<string>(deriveTimeInputValue(event?.startTime));
 
   const {
     register,
@@ -45,13 +62,18 @@ export default function EventForm({
     setValue,
     watch,
   } = useForm<EventFormData>({
-    defaultValues: event || {
-      title: "",
-      description: "",
-      tags: [],
-      location: { lat: 40.7128, lng: -74.0060 },
+    defaultValues: {
+      title: event?.title ?? "",
+      description: event?.description ?? "",
+      tags: event?.tags ?? [],
+      location: event?.location ?? { lat: 40.7128, lng: -74.0060 },
+      startTime: event?.startTime ?? new Date().toISOString(),
     },
   });
+
+  useEffect(() => {
+    setStartTime(deriveTimeInputValue(event?.startTime));
+  }, [event?.startTime]);
 
   const location = watch("location");
 
@@ -122,6 +144,10 @@ export default function EventForm({
     setError(null);
     setSubmitting(true);
 
+    const [hours = "0", minutes = "0"] = startTime.split(":");
+    const startDate = new Date();
+    startDate.setHours(Number(hours), Number(minutes), 0, 0);
+
     try {
       // Include consent flag in submission
       // Ensure tags is an array
@@ -132,6 +158,7 @@ export default function EventForm({
           lat: typeof data.location.lat === "number" ? data.location.lat : parseFloat(data.location.lat),
           lng: typeof data.location.lng === "number" ? data.location.lng : parseFloat(data.location.lng),
         },
+        startTime: startDate.toISOString(),
         consentGiven: true,
       };
       
@@ -172,6 +199,17 @@ export default function EventForm({
               <p className="text-red-600 text-sm mt-1 font-medium">{errors.title.message}</p>
             )}
           </div>
+
+          <section className="space-y-2">
+            <label className="block text-sm font-medium text-gray-900">Start Time *</label>
+            <input
+              type="time"
+              value={startTime}
+              onChange={(eventValue) => setStartTime(eventValue.target.value)}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              required
+            />
+          </section>
 
           <div>
             <label className="block text-sm font-medium mb-1 text-gray-900">

@@ -40,6 +40,7 @@ interface EventResponse {
   source: "AI" | "User";
   tenantId?: string;
   createdAt?: string | Date;
+  startTime?: string;
 }
 
 import type { FirestoreEventRecord } from "@/types/firestore";
@@ -202,7 +203,10 @@ export async function GET(req: Request) {
       }
 
       return {
-        id: event.id || `user-${Date.now()}-${index}`,
+        id:
+          typeof event.id === "string" && event.id.trim().length > 0
+            ? event.id.trim()
+            : `user-${tenantId}-${index}`,
         title: sanitizeText(event.title) || "Community Hang Out",
         description: sanitizeText(event.description) || "",
         tags: tagList,
@@ -211,6 +215,10 @@ export async function GET(req: Request) {
         source: "User" as const,
         tenantId: resolvedTenantId,
         createdAt: resolveEventDate(event.createdAt),
+        startTime:
+          typeof event.startTime === "string" && event.startTime.trim().length > 0
+            ? event.startTime
+            : undefined,
       };
     });
 
@@ -278,6 +286,10 @@ export async function GET(req: Request) {
                   source: "AI" as const,
                   tenantId: suggestion.tenantId || tenantId,
                   createdAt: resolveEventDate(suggestion.createdAt),
+                  startTime:
+                    typeof suggestion.startTime === "string" && suggestion.startTime.trim().length > 0
+                      ? suggestion.startTime
+                      : undefined,
                 }));
                 // Cache it per tenant with metadata
                 aiEventCache.set(cacheKey, { 

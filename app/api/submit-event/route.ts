@@ -7,7 +7,7 @@ import { EventFormData } from "@/lib/types";
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { title, description, tags, location, userId } = body;
+    const { title, description, tags, location, userId, startTime } = body;
 
     // Validate authentication
     if (!userId) {
@@ -18,7 +18,7 @@ export async function POST(req: Request) {
     }
 
     // Validate event data
-    const validation = validateEventData({ title, description, tags, location });
+    const validation = validateEventData({ title, description, tags, location, startTime });
     if (!validation.valid) {
       return NextResponse.json(
         { error: "Validation failed", errors: validation.errors },
@@ -35,6 +35,7 @@ export async function POST(req: Request) {
         lat: Number(location.lat),
         lng: Number(location.lng),
       },
+      startTime: new Date(startTime ?? Date.now()).toISOString(),
     };
 
     // Save to Firestore

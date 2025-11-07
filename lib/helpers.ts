@@ -61,6 +61,15 @@ export const validateEventData = (data: any): { valid: boolean; errors: string[]
     }
   }
 
+  if (!data.startTime || typeof data.startTime !== "string") {
+    errors.push("Start time is required");
+  } else {
+    const parsed = new Date(data.startTime);
+    if (Number.isNaN(parsed.valueOf())) {
+      errors.push("Start time must be a valid date/time value");
+    }
+  }
+
   return {
     valid: errors.length === 0,
     errors,

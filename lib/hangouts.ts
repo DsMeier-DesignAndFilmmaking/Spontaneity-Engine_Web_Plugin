@@ -12,6 +12,7 @@ interface HangoutDocData {
   location?: unknown;
   createdBy?: unknown;
   createdAt?: SupportedTimestamp;
+  startTime?: SupportedTimestamp;
   source?: unknown;
   tenantId?: unknown;
   consentGiven?: unknown;
@@ -103,6 +104,10 @@ export function mapHangoutDocument(docData: HangoutDocData = {}, docId: string):
     sanitizeString(docData.profileImageUrl) ||
     DEFAULT_AVATAR;
 
+  const resolvedStartTime = docData.startTime
+    ? resolveCreatedAt(docData.startTime).toISOString()
+    : undefined;
+
   return {
     id: docId,
     title: typeof docData.title === "string" ? docData.title : "",
@@ -120,6 +125,7 @@ export function mapHangoutDocument(docData: HangoutDocData = {}, docId: string):
       name: creatorName,
       profileImageUrl: creatorProfileImageUrl,
     },
+    startTime: resolvedStartTime,
   };
 }
 

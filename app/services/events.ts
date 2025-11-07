@@ -53,6 +53,7 @@ type RawEventData = {
   location?: unknown;
   createdBy?: unknown;
   createdAt?: unknown;
+  startTime?: unknown;
   tenantId?: unknown;
   consentGiven?: unknown;
   creator?: RawEventCreator;
@@ -114,6 +115,7 @@ interface SubmitEventPayload {
   creator?: EventCreator;
   creatorName?: string;
   creatorProfileImageUrl?: string;
+  startTime?: string;
   [key: string]: unknown;
 }
 
@@ -189,6 +191,22 @@ function normalizeEvent(docData: RawEventData, docId: string, anonymize: boolean
     tenantId: sanitizeString(docData.tenantId),
     consentGiven: typeof docData.consentGiven === "boolean" ? docData.consentGiven : true,
     creator,
+    startTime:
+      typeof docData.startTime === "string" && docData.startTime.trim().length > 0
+        ? docData.startTime
+        : docData.startTime && typeof docData.startTime === "object" && "toDate" in (docData.startTime as { toDate?: () => Date })
+        ? (() => {
+            try {
+              const converted = (docData.startTime as { toDate: () => Date }).toDate();
+              return converted instanceof Date && !Number.isNaN(converted.valueOf())
+                ? converted.toISOString()
+                : undefined;
+            } catch (error) {
+              console.warn("Failed to convert startTime timestamp:", error);
+              return undefined;
+            }
+          })()
+        : undefined,
   };
 
   if (anonymize && normalized.createdBy && normalized.createdBy !== "ai" && !normalized.createdBy.startsWith("AI-")) {
@@ -306,6 +324,13 @@ export async function submitEvent(event: SubmitEventPayload, tenantId?: string) 
     throw new Error("tenantId is required for multi-tenant support");
   }
 
+  const normalizedStartTime = event.startTime
+    ? (() => {
+        const parsed = new Date(event.startTime as string);
+        return Number.isNaN(parsed.valueOf()) ? undefined : parsed.toISOString();
+      })()
+    : undefined;
+
   // Validate required fields
   if (!event.title || !event.description || !event.location) {
     throw new Error("Missing required fields: title, description, and location are required");
@@ -368,9 +393,10 @@ export async function submitEvent(event: SubmitEventPayload, tenantId?: string) 
         creator: creatorInfo,
         tenantId,
         consentGiven: event.consentGiven ?? true,
+        startTime: normalizedStartTime,
         createdAt: FieldValue.serverTimestamp(),
       });
-      return { id: docRef.id, ...event, tenantId, creator: creatorInfo };
+      return { id: docRef.id, ...event, startTime: normalizedStartTime, tenantId, creator: creatorInfo };
     } catch (error) {
       console.error("Admin SDK error:", error);
       // Fall through to regular SDK
@@ -397,9 +423,10 @@ export async function submitEvent(event: SubmitEventPayload, tenantId?: string) 
       creator: creatorInfo,
       tenantId,
       consentGiven: event.consentGiven ?? true,
+      startTime: normalizedStartTime,
       createdAt: serverTimestamp(),
     });
-    return { id: docRef.id, ...event, tenantId, creator: creatorInfo };
+    return { id: docRef.id, ...event, startTime: normalizedStartTime, tenantId, creator: creatorInfo };
   } catch (error) {
     const err = error as { code?: string; message?: string; name?: string };
     console.error("Firestore submit error:", error);

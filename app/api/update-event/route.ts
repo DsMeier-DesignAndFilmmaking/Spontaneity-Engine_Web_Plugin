@@ -6,7 +6,7 @@ import { validateEventData } from "@/lib/helpers";
 export async function PATCH(req: Request) {
   try {
     const body = await req.json();
-    const { id, updates, eventId, title, description, tags, location, userId } = body;
+    const { id, updates, eventId, title, description, tags, location, startTime, userId } = body;
     
     // Support both formats: { id, updates } and { eventId, title, description, ... }
     const actualEventId = id || eventId;
@@ -15,6 +15,7 @@ export async function PATCH(req: Request) {
       ...(description !== undefined && { description }),
       ...(tags !== undefined && { tags }),
       ...(location !== undefined && { location }),
+      ...(startTime !== undefined && { startTime }),
     };
     const actualUserId = userId || body.userId;
 
@@ -62,12 +63,13 @@ export async function PATCH(req: Request) {
       Object.assign(updateData, updates);
     } else {
       // If using the detailed format, validate and prepare
-      if (title !== undefined || description !== undefined || tags !== undefined || location !== undefined) {
+      if (title !== undefined || description !== undefined || tags !== undefined || location !== undefined || startTime !== undefined) {
         const fullData = {
           title: title ?? eventData.title,
           description: description ?? eventData.description,
           tags: tags ?? eventData.tags,
           location: location ?? eventData.location,
+          startTime: startTime ?? eventData.startTime,
         };
 
         const validation = validateEventData(fullData);
@@ -89,7 +91,15 @@ export async function PATCH(req: Request) {
             lng: Number(location.lng),
           };
         }
+        if (startTime !== undefined) {
+          updateData.startTime = new Date(startTime).toISOString();
+        }
       }
+    }
+
+    if (actualUpdates?.startTime !== undefined && updateData.startTime === undefined) {
+      const parsed = new Date(actualUpdates.startTime as string);
+      updateData.startTime = Number.isNaN(parsed.valueOf()) ? new Date().toISOString() : parsed.toISOString();
     }
 
     // Update the event

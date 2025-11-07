@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
+import Link from "next/link";
 
 import MapView from "@/app/components/MapView";
 import EventFeed from "@/app/components/EventFeed";
@@ -22,6 +23,7 @@ export default function SpontaneousExperiencePageContent() {
   const [selectedEventId, setSelectedEventId] = useState<string | undefined>();
   const [panelOpen, setPanelOpen] = useState(false);
   const [detailEvent, setDetailEvent] = useState<Event | null>(null);
+  const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [activeRoute, setActiveRoute] = useState<NavigationRoutePayload | null>(null);
 
   const handleBack = useCallback(() => {
@@ -41,7 +43,7 @@ export default function SpontaneousExperiencePageContent() {
     (event: Event) => {
       setDetailEvent(event);
       setSelectedEventId(event.id);
-      setPanelOpen(true);
+      setIsDetailOpen(true);
     },
     []
   );
@@ -69,6 +71,28 @@ export default function SpontaneousExperiencePageContent() {
         exit={{ opacity: 0 }}
         transition={{ duration: 0.25, ease: "easeOut" }}
       >
+        <div className="pointer-events-none fixed left-0 top-0 z-40 flex flex-col gap-3 px-4 pt-4 sm:px-6 lg:px-8">
+          <div className="pointer-events-auto">
+            <Link
+              href="/"
+              className="inline-flex items-center gap-2 rounded-full bg-white/95 px-4 py-2 text-sm font-semibold text-gray-900 shadow-lg backdrop-blur transition hover:bg-white"
+            >
+              🌍 TravelAI
+            </Link>
+          </div>
+
+          <div className="pointer-events-auto">
+            <button
+              type="button"
+              onClick={handleBack}
+              className="inline-flex items-center gap-2 rounded-full bg-white/95 px-3 py-2 text-sm font-semibold text-gray-900 shadow-lg backdrop-blur transition hover:bg-white"
+            >
+              <span className="text-lg leading-none">←</span>
+              Back
+            </button>
+          </div>
+        </div>
+
         <div className="relative flex-1">
           <MapView
             events={events}
@@ -78,19 +102,9 @@ export default function SpontaneousExperiencePageContent() {
             onClearNavigation={() => {
               setActiveRoute(null);
               setDetailEvent(null);
+              setIsDetailOpen(false);
             }}
           />
-
-          <motion.button
-            type="button"
-            onClick={handleBack}
-            className="pointer-events-auto absolute top-5 left-4 z-40 flex items-center gap-2 rounded-full bg-white/85 px-4 py-2 text-sm font-semibold text-gray-900 shadow-lg backdrop-blur transition hover:bg-white"
-            initial={{ y: -12, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-          >
-            <span className="text-lg leading-none">←</span>
-            Back
-          </motion.button>
 
           {!panelOpen && (
             <motion.button
@@ -98,8 +112,9 @@ export default function SpontaneousExperiencePageContent() {
               onClick={() => {
                 setPanelOpen(true);
                 setDetailEvent(null);
+                setIsDetailOpen(false);
               }}
-              className="pointer-events-auto absolute bottom-32 right-4 md:bottom-24 md:right-6 z-40 flex items-center gap-2 rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-lg transition hover:bg-blue-700"
+              className={`pointer-events-auto absolute bottom-32 right-4 md:bottom-24 md:right-6 z-40 flex items-center gap-2 rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-lg transition hover:bg-blue-700 ${panelOpen ? "md:translate-x-[-200px]" : ""}`}
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -174,6 +189,7 @@ export default function SpontaneousExperiencePageContent() {
                   onClick={() => {
                     setPanelOpen(false);
                     setDetailEvent(null);
+                    setIsDetailOpen(false);
                   }}
                   className="flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 text-gray-500 transition hover:border-gray-300 hover:text-gray-700"
                   aria-label="Close panel"
@@ -212,22 +228,33 @@ export default function SpontaneousExperiencePageContent() {
                 <div className="hidden h-full overflow-y-auto md:block">
                   <EventDetailPanel
                     event={detailEvent}
-                    onClose={() => setDetailEvent(null)}
+                    onClose={() => {
+                      setDetailEvent(null);
+                      setIsDetailOpen(false);
+                    }}
                   />
                 </div>
               )}
             </div>
           </motion.aside>
         )}
-        {panelOpen && detailEvent && (
-          <div className="pointer-events-none absolute inset-y-0 right-0 z-20 flex w-full max-w-sm flex-col bg-transparent md:hidden">
-            <div className="pointer-events-auto"> 
-              <EventDetailPanel
-                event={detailEvent}
-                onClose={() => setDetailEvent(null)}
-              />
-            </div>
-          </div>
+        {isDetailOpen && detailEvent && (
+          <motion.aside
+            key="detail-panel"
+            className="pointer-events-auto absolute inset-y-0 left-0 z-30 flex w-full max-w-sm flex-col bg-white shadow-2xl md:max-w-md"
+            initial={{ x: "-100%", opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: "-100%", opacity: 0 }}
+            transition={{ duration: 0.25, ease: "easeOut" }}
+          >
+            <EventDetailPanel
+              event={detailEvent}
+              onClose={() => {
+                setDetailEvent(null);
+                setIsDetailOpen(false);
+              }}
+            />
+          </motion.aside>
         )}
       </motion.div>
     </AnimatePresence>

@@ -23,6 +23,7 @@ export interface Event {
   // GDPR/Privacy compliance fields
   consentGiven?: boolean; // User consent for data processing
   anonymizedUserId?: string; // Anonymized user ID for external tenants
+  startTime?: string;
 }
 
 export interface EventFormData {
@@ -33,6 +34,7 @@ export interface EventFormData {
     lat: number;
     lng: number;
   };
+  startTime?: string;
 }
 
 export interface ApiError {

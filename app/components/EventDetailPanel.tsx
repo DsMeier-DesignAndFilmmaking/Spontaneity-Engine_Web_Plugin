@@ -11,14 +11,18 @@ interface EventDetailPanelProps {
 
 const formatCoordinate = (value: number) => value.toFixed(5);
 
-const resolveCreatedAt = (value: Event["createdAt"]): Date => {
+const resolveDate = (value: unknown): Date => {
   if (value instanceof Date) {
     return value;
   }
   if (value && typeof value === "object" && "toDate" in value && typeof (value as { toDate?: () => Date }).toDate === "function") {
-    const converted = (value as { toDate: () => Date }).toDate();
-    if (converted instanceof Date && !Number.isNaN(converted.valueOf())) {
-      return converted;
+    try {
+      const converted = (value as { toDate: () => Date }).toDate();
+      if (converted instanceof Date && !Number.isNaN(converted.valueOf())) {
+        return converted;
+      }
+    } catch (error) {
+      console.warn("Failed to convert Firestore timestamp:", error);
     }
   }
   if (typeof value === "string" || typeof value === "number") {
@@ -31,7 +35,7 @@ const resolveCreatedAt = (value: Event["createdAt"]): Date => {
 };
 
 export default function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
-  const postedAt = resolveCreatedAt(event.createdAt);
+  const postedAt = resolveDate(event.createdAt);
   const tags = Array.isArray(event.tags) ? event.tags : [];
   const hasLocation = Boolean(event.location && typeof event.location.lat === "number" && typeof event.location.lng === "number");
 
@@ -63,6 +67,11 @@ export default function EventDetailPanel({ event, onClose }: EventDetailPanelPro
           <p className="text-sm text-gray-700 leading-relaxed">
             {event.description?.trim() || "No description provided for this hang out."}
           </p>
+          {event.startTime && (
+            <p className="text-sm text-gray-600">
+              Start time: {formatDateTime(resolveDate(event.startTime))}
+            </p>
+          )}
         </section>
 
         {tags.length > 0 && (

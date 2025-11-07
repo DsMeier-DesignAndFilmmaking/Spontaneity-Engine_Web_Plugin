@@ -255,6 +255,12 @@ export default function EventCard({
       <div className="mb-3">
         <h3 className="text-lg font-semibold text-gray-900">{event.title}</h3>
         <p className="mt-1 text-gray-800">{event.description}</p>
+        {event.startTime && (
+          <p className="mt-2 flex items-center gap-2 text-xs font-medium text-gray-600">
+            <span aria-hidden="true" role="img">🕒</span>
+            {formatDateTime(new Date(event.startTime))}
+          </p>
+        )}
       </div>
 
       {editing ? (
