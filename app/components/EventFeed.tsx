@@ -72,6 +72,27 @@ interface EventFeedProps {
   aiBackgroundColor?: string; // Background color for AI event cards
 }
 
+const EARTH_RADIUS_METERS = 6_371_000;
+
+const haversineDistanceMeters = (
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number }
+): number => {
+  const toRadians = (value: number) => (value * Math.PI) / 180;
+  const dLat = toRadians(b.lat - a.lat);
+  const dLng = toRadians(b.lng - a.lng);
+
+  const lat1 = toRadians(a.lat);
+  const lat2 = toRadians(b.lat);
+
+  const haversine =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+
+  const c = 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+  return EARTH_RADIUS_METERS * c;
+};
+
 export default function EventFeed({
   onEventsChange,
   defaultApiKey,
@@ -303,6 +324,18 @@ export default function EventFeed({
               lng: target.location!.lng,
               name: target.title,
             };
+
+            const MAX_WALKING_DISTANCE_METERS = 200_000; // ~200 km safeguard
+            const straightLineDistance = haversineDistanceMeters(originCoords, destinationCoords);
+
+            if (straightLineDistance > MAX_WALKING_DISTANCE_METERS) {
+              showNotification(
+                "error",
+                "This hang out is too far away to walk. Try another transport option or a closer destination."
+              );
+              setNavigationLoading(false);
+              return;
+            }
 
             const route = await getWalkingRoute(originCoords, destinationCoords);
 

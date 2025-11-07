@@ -48,9 +48,20 @@ export async function getWalkingRoute(
   url.searchParams.set("overview", "full");
   url.searchParams.set("access_token", accessToken);
 
-  const response = await fetch(url.toString());
+  let response: Response;
+  try {
+    response = await fetch(url.toString());
+  } catch (networkError) {
+    throw new Error("Network error contacting Mapbox Directions API.");
+  }
+
   if (!response.ok) {
     const message = await response.text();
+    if (response.status === 422 && message.includes("Route exceeds maximum distance")) {
+      throw new Error(
+        "Walking route is too long for Mapbox. Try a closer destination or switch to driving directions."
+      );
+    }
     throw new Error(`Failed to fetch directions: ${response.status} ${message}`);
   }
 
