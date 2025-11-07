@@ -186,6 +186,11 @@ export async function GET(req: Request) {
 
     // Normalize user events to consistent schema
     const normalizedUserEvents: EventResponse[] = filteredUserEvents.map((event, index) => {
+      const eventTenantId =
+        typeof (event as { tenantId?: unknown }).tenantId === "string"
+          ? ((event as { tenantId?: string }).tenantId as string)
+          : undefined;
+
       const safeLocation =
         event.location &&
         typeof event.location === "object" &&
@@ -206,7 +211,7 @@ export async function GET(req: Request) {
         location: safeLocation,
         createdBy: sanitizeText(event.createdBy) || "unknown",
         source: "User" as const,
-        tenantId: tenantId,
+        tenantId: sanitizeText(eventTenantId) || tenantId,
         createdAt: resolveEventDate(event.createdAt),
       };
     });
