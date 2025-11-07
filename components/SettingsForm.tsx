@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { UserPreferences, Spontaneity, LocationSharing } from "@/types/settings";
-import type { FeatureFlagSnapshot } from "@/lib/feature-flags";
-import { enforcePreferenceFlags } from "@/lib/feature-flags";
+import type { FeatureFlagSnapshot } from "@/lib/feature-flag-types";
+import { enforcePreferenceFlags } from "@/lib/feature-flag-types";
 
 const SPONTANEITY_SCALE: Spontaneity[] = ["low", "medium", "high"];
 const RADIUS_PRESETS = [3, 5, 10];

@@ -9,10 +9,10 @@ import { validateUserPreferences, validatePartialPreferences } from "@/lib/valid
 import { createDefaultPreferences } from "@/lib/default-preferences";
 import {
   ensureDefaultFlags,
-  enforcePreferenceFlags,
   getFeatureFlagSnapshot,
   isFeatureEnabled,
 } from "@/lib/feature-flags";
+import { enforcePreferenceFlags } from "@/lib/feature-flag-types";
 
 function handleError(error: unknown): NextResponse {
   if (error instanceof UnauthorizedError) {

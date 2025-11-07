@@ -11,9 +11,9 @@ import { createDefaultPreferences } from "@/lib/default-preferences";
 import {
   ensureDefaultFlags,
   getFeatureFlagSnapshot,
-  enforcePreferenceFlags,
   isFeatureEnabled,
 } from "@/lib/feature-flags";
+import { enforcePreferenceFlags } from "@/lib/feature-flag-types";
 import type { UserPreferences } from "@/types/settings";
 
 function handleError(error: unknown): NextResponse {

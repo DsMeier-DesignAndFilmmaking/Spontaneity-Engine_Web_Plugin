@@ -12,8 +12,8 @@ import {
   ensureDefaultFlags,
   getFeatureFlagSnapshot,
   isFeatureEnabled,
-  enforcePreferenceFlags,
 } from "@/lib/feature-flags";
+import { enforcePreferenceFlags } from "@/lib/feature-flag-types";
 
 function handleError(error: unknown): NextResponse {
   if (error instanceof UnauthorizedError) {

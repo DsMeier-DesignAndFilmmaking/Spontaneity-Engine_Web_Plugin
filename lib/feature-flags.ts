@@ -1,8 +1,8 @@
 import { getQueryExecutor, type QueryExecutor } from "./db";
-import type { UserPreferences } from "@/types/settings";
+import type { FeatureFlagKey, FeatureFlagSnapshot } from "./feature-flag-types";
+export type { FeatureFlagKey, FeatureFlagSnapshot } from "./feature-flag-types";
 
-const FLAG_KEYS = ["settings_ui_enabled", "auto_join_v1", "live_location"] as const;
-export type FeatureFlagKey = (typeof FLAG_KEYS)[number];
+const FLAG_KEYS: FeatureFlagKey[] = ["settings_ui_enabled", "auto_join_v1", "live_location"];
 
 type FeatureFlagRecord = {
   key: string;
@@ -117,29 +117,10 @@ export async function isFeatureEnabled(key: FeatureFlagKey, defaultValue = false
   return flag.enabled;
 }
 
-export type FeatureFlagSnapshot = Record<FeatureFlagKey, { enabled: boolean; payload: Record<string, unknown> | null }>;
-
 export async function getFeatureFlagSnapshot(): Promise<FeatureFlagSnapshot> {
   const flags = await listFeatureFlags();
   return flags.reduce<FeatureFlagSnapshot>((acc, flag) => {
     acc[flag.key] = { enabled: flag.enabled, payload: flag.payload };
     return acc;
   }, {} as FeatureFlagSnapshot);
-}
-
-export function enforcePreferenceFlags<T extends UserPreferences>(
-  prefs: T,
-  snapshot: FeatureFlagSnapshot
-): T {
-  const clone = { ...prefs } as T;
-
-  if (!snapshot.auto_join_v1?.enabled) {
-    clone.autoJoin = false;
-  }
-
-  if (!snapshot.live_location?.enabled) {
-    clone.locationSharing = "off";
-  }
-
-  return clone;
 }
