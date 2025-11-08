@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { fetchUserEvents } from "@/app/services/events";
-import { generateLocalAISuggestions } from "@/app/services/ai";
+import { generateLocalAISuggestions, type WeatherContext } from "@/app/services/ai";
 import { getTenantId } from "@/app/services/tenant";
 import { checkRateLimit } from "@/app/services/rate-limit";
 
@@ -92,6 +92,133 @@ const sanitizeText = (value?: unknown): string | undefined => {
   return trimmed.length > 0 ? trimmed : undefined;
 };
 
+const OUTDOOR_TAG_PATTERNS = [/outdoor/i, /outdoors/i, /outside/i, /hike/i, /trail/i, /park/i, /camp/i, /beach/i];
+
+function pruneOutdoorTags(tags: string[] | undefined, shouldAvoidOutdoor: boolean): string[] | undefined {
+  if (!shouldAvoidOutdoor || !tags) {
+    return tags;
+  }
+
+  const filtered = tags.filter((tag) => !OUTDOOR_TAG_PATTERNS.some((pattern) => pattern.test(tag)));
+  if (!filtered.some((tag) => /indoor/i.test(tag))) {
+    filtered.push("indoor");
+  }
+  return filtered;
+}
+
+function parseWeatherParam(
+  raw: string | null,
+): { weatherInput: string | WeatherContext | null; avoidOutdoor: boolean } {
+  if (!raw) {
+    return { weatherInput: null, avoidOutdoor: false };
+  }
+
+  let decoded = raw;
+  try {
+    decoded = decodeURIComponent(raw);
+  } catch {
+    // If decode fails, fall back to original value
+  }
+
+  const trimmed = decoded.trim();
+  if (!trimmed) {
+    return { weatherInput: null, avoidOutdoor: false };
+  }
+
+  let parsed: unknown;
+  if (trimmed.startsWith("{")) {
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      parsed = null;
+    }
+  }
+
+  if (parsed && typeof parsed === "object") {
+    const maybeWeather = parsed as Record<string, unknown>;
+
+    const temperatureC =
+      typeof maybeWeather.temperatureC === "number" ? maybeWeather.temperatureC : undefined;
+    const feelsLikeC =
+      typeof maybeWeather.feelsLikeC === "number" ? maybeWeather.feelsLikeC : undefined;
+    const condition =
+      typeof maybeWeather.condition === "string"
+        ? maybeWeather.condition
+        : typeof maybeWeather.title === "string"
+        ? maybeWeather.title
+        : typeof maybeWeather.description === "string"
+        ? maybeWeather.description
+        : undefined;
+    const windSpeedMph =
+      typeof maybeWeather.windSpeedMph === "number"
+        ? maybeWeather.windSpeedMph
+        : typeof maybeWeather.windSpeed === "number"
+        ? maybeWeather.windSpeed
+        : undefined;
+    const humidity =
+      typeof maybeWeather.humidity === "number" ? maybeWeather.humidity : undefined;
+
+    let precipitationChance: number | undefined;
+    if (typeof maybeWeather.precipitationChance === "number") {
+      precipitationChance = maybeWeather.precipitationChance;
+    } else if (typeof maybeWeather.precipitationProbability === "number") {
+      precipitationChance = maybeWeather.precipitationProbability;
+    }
+
+    const summary =
+      typeof maybeWeather.summary === "string"
+        ? maybeWeather.summary
+        : typeof maybeWeather.description === "string"
+        ? maybeWeather.description
+        : undefined;
+
+    const conditionLower = condition?.toLowerCase() ?? "";
+    const precipPercent =
+      typeof precipitationChance === "number"
+        ? precipitationChance > 1
+          ? precipitationChance
+          : precipitationChance * 100
+        : undefined;
+
+    const shouldAvoidOutdoor =
+      conditionLower.includes("rain") ||
+      conditionLower.includes("storm") ||
+      conditionLower.includes("thunder") ||
+      conditionLower.includes("snow") ||
+      (typeof precipPercent === "number" && precipPercent >= 60);
+
+    const advisory =
+      typeof maybeWeather.advisory === "string" && maybeWeather.advisory.trim().length > 0
+        ? maybeWeather.advisory
+        : shouldAvoidOutdoor
+        ? "Conditions are wet or changeable—prioritize indoor or covered experiences."
+        : undefined;
+
+    const weatherInput: WeatherContext = {
+      summary: summary ?? undefined,
+      temperatureC,
+      feelsLikeC,
+      condition,
+      windSpeedMph,
+      precipitationChance:
+        typeof precipitationChance === "number" ? precipitationChance : undefined,
+      humidity,
+      advisory,
+    };
+
+    return { weatherInput, avoidOutdoor: shouldAvoidOutdoor };
+  }
+
+  const lower = trimmed.toLowerCase();
+  const avoidOutdoor =
+    lower.includes("rain") ||
+    lower.includes("storm") ||
+    lower.includes("thunder") ||
+    lower.includes("snow");
+
+  return { weatherInput: trimmed, avoidOutdoor };
+}
+
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
@@ -152,11 +279,12 @@ export async function GET(req: Request) {
     const cityParam = searchParams.get("city");
     const travelerType = searchParams.get("travelerType");
     const mood = searchParams.get("mood");
-    const weather = searchParams.get("weather");
+    const { weatherInput, avoidOutdoor } = parseWeatherParam(searchParams.get("weather"));
     const timezone = searchParams.get("timezone");
     const includeAI = searchParams.get("includeAI") !== "false"; // Default to true
     const tagsParam = searchParams.get("tags");
-    const tags = tagsParam ? tagsParam.split(",").map(t => t.trim()).filter(t => t.length > 0) : undefined;
+    const parsedTags = tagsParam ? tagsParam.split(",").map(t => t.trim()).filter(t => t.length > 0) : undefined;
+    const tags = pruneOutdoorTags(parsedTags, avoidOutdoor);
     const createdBy = searchParams.get("createdBy") || undefined;
     const sortBy = searchParams.get("sortBy") || "newest"; // newest, nearest (future)
     
@@ -272,7 +400,7 @@ export async function GET(req: Request) {
                   city: cityParam,
                   travelerType: travelerType || undefined,
                   mood: mood || undefined,
-                  weather: weather || undefined,
+                  weather: weatherInput || undefined,
                   timezone: timezone || undefined,
                 });
 

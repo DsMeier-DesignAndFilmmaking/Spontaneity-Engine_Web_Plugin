@@ -12,6 +12,17 @@ interface AISuggestion {
   tip?: string;
 }
 
+export interface WeatherContext {
+  summary?: string | null;
+  temperatureC?: number | null;
+  feelsLikeC?: number | null;
+  condition?: string | null;
+  windSpeedMph?: number | null;
+  precipitationChance?: number | null; // 0-1 or 0-100 supported
+  humidity?: number | null;
+  advisory?: string | null;
+}
+
 export interface GenerateAISuggestionsOptions {
   location: string;
   tenantId?: string | null;
@@ -20,7 +31,7 @@ export interface GenerateAISuggestionsOptions {
   region?: string | null;
   travelerType?: string | null;
   mood?: string | null;
-  weather?: string | null;
+  weather?: string | WeatherContext | null;
   timezone?: string | null;
 }
 
@@ -121,6 +132,80 @@ export async function generateLocalAISuggestions({
 
   const tenantTemplate = getTenantPromptTemplate(tenantId);
 
+  const buildWeatherContext = (weatherInput: string | WeatherContext | null | undefined) => {
+    if (!weatherInput) {
+      return { snapshot: "", advisory: "" };
+    }
+
+    if (typeof weatherInput === "string") {
+      const trimmed = weatherInput.trim();
+      if (!trimmed) return { snapshot: "", advisory: "" };
+      return {
+        snapshot: `Weather snapshot: ${trimmed}`,
+        advisory: "",
+      };
+    }
+
+    const {
+      summary,
+      temperatureC,
+      feelsLikeC,
+      condition,
+      windSpeedMph,
+      precipitationChance,
+      humidity,
+      advisory,
+    } = weatherInput;
+
+    const lines: string[] = [];
+
+    if (summary && summary.trim().length > 0) {
+      lines.push(summary.trim());
+    } else {
+      const parts: string[] = [];
+      if (typeof temperatureC === "number" && Number.isFinite(temperatureC)) {
+        parts.push(`${Math.round(temperatureC)}°C`);
+      }
+      if (typeof feelsLikeC === "number" && Number.isFinite(feelsLikeC)) {
+        parts.push(`feels like ${Math.round(feelsLikeC)}°C`);
+      }
+      if (condition && condition.trim().length > 0) {
+        parts.push(condition.trim());
+      }
+      if (typeof windSpeedMph === "number" && Number.isFinite(windSpeedMph)) {
+        parts.push(`winds ${Math.round(windSpeedMph)} mph`);
+      }
+      if (typeof humidity === "number" && Number.isFinite(humidity)) {
+        parts.push(`humidity ${Math.round(humidity)}%`);
+      }
+      if (typeof precipitationChance === "number" && Number.isFinite(precipitationChance)) {
+        const precipPercent = precipitationChance > 1 ? precipitationChance : precipitationChance * 100;
+        parts.push(`precipitation ${Math.round(precipPercent)}%`);
+      }
+
+      if (parts.length > 0) {
+        lines.push(`Weather snapshot: ${parts.join(", ")}`);
+      }
+    }
+
+    let advisoryLine = "";
+    if (advisory && advisory.trim().length > 0) {
+      advisoryLine = advisory.trim();
+    } else if (typeof precipitationChance === "number" && Number.isFinite(precipitationChance)) {
+      const precipPercent = precipitationChance > 1 ? precipitationChance : precipitationChance * 100;
+      if (precipPercent >= 50) {
+        advisoryLine = "Weather advisory: Favor indoor or covered experiences when precipitation is above 50%.";
+      }
+    }
+
+    return {
+      snapshot: lines.join(" "),
+      advisory: advisoryLine,
+    };
+  };
+
+  const { snapshot: weatherSnapshot, advisory: weatherAdvisory } = buildWeatherContext(weather);
+
   const prompt = `
 You are a travel assistant AI specialized in spontaneous local experiences.
 
@@ -129,7 +214,8 @@ Location: ${coordinateLabel} (${locationLabel})
 Current time: ${localTime}
 Traveler type: ${travelerType}
 ${mood ? `Mood / preference: ${mood}` : ""}
-${weather ? `Current weather: ${weather}` : ""}
+${weatherSnapshot ? `${weatherSnapshot}` : ""}
+${weatherAdvisory ? `${weatherAdvisory}` : ""}
 
 Task:
 Generate 3 unique, specific, and engaging local events or hangouts for the user RIGHT NOW.
