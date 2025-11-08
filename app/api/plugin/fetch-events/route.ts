@@ -3,6 +3,7 @@ import { fetchUserEvents } from "@/app/services/events";
 import { generateLocalAISuggestions, type WeatherContext } from "@/app/services/ai";
 import { getTenantId } from "@/app/services/tenant";
 import { checkRateLimit } from "@/app/services/rate-limit";
+import { fetchSpontaneousData, type SpontaneousCard } from "@/lib/fetchSpontaneousData";
 
 // Enhanced in-memory cache for AI events with incremental updates support
 interface CacheEntry {
@@ -14,6 +15,7 @@ interface CacheEntry {
 
 const aiEventCache: Map<string, CacheEntry> = new Map();
 const DEFAULT_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+const DEFAULT_COORDS = { lat: 38.9072, lng: -77.0369 };
 
 /**
  * Clean up expired cache entries
@@ -386,22 +388,45 @@ export async function GET(req: Request) {
               } else {
                 // Generate new AI event with tenant-specific prompt (server-side only)
                 console.log(`[Cache Miss] Generating new AI event for ${tenantId} at ${location}`);
-                const coordinates =
+                const coordinatesCandidate =
                   userLatParam && userLngParam
                     ? {
                         lat: parseFloat(userLatParam),
                         lng: parseFloat(userLngParam),
                       }
                     : undefined;
+                const hasValidCoordinates =
+                  coordinatesCandidate &&
+                  Number.isFinite(coordinatesCandidate.lat) &&
+                  Number.isFinite(coordinatesCandidate.lng);
+                const normalizedCoordinates = hasValidCoordinates ? coordinatesCandidate : null;
+
+                let aggregatedCards: SpontaneousCard[] = [];
+                try {
+                  const queryCoords = normalizedCoordinates ?? DEFAULT_COORDS;
+                  aggregatedCards = await fetchSpontaneousData({
+                    location: queryCoords,
+                    radius: 5,
+                    mood: mood || undefined,
+                    preferences: tags ?? undefined,
+                    requestedAt: new Date().toISOString(),
+                  });
+                } catch (aggregateError) {
+                  console.warn("Failed to aggregate spontaneous data for AI prompt:", aggregateError);
+                }
+
                 const generatedSuggestions = await generateLocalAISuggestions({
                   location,
                   tenantId,
-                  coordinates: coordinates && !Number.isNaN(coordinates.lat) && !Number.isNaN(coordinates.lng) ? coordinates : null,
+                  coordinates: normalizedCoordinates,
                   city: cityParam,
                   travelerType: travelerType || undefined,
                   mood: mood || undefined,
                   weather: weatherInput || undefined,
                   timezone: timezone || undefined,
+                  aggregatedCards,
+                  preferences: tags ?? undefined,
+                  historyKey: tenantId ?? apiKey ?? null,
                 });
 
                 aiEventsForResponse = generatedSuggestions.map((suggestion) => ({

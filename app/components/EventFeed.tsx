@@ -877,14 +877,28 @@ export default function EventFeed({
 
       {user && (
         <>
-          <button
-            className="mb-4 w-full rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-900 transition hover:bg-gray-100"
-            onClick={() => setShowForm(!showForm)}
-          >
-            {showForm ? "Cancel" : `+ Create ${eventLabel}`}
-          </button>
+          <div className="sticky top-0 z-20 -mx-4 mb-4 px-4 pt-2 pb-3 backdrop-blur bg-white/95">
+            <div className="flex items-center gap-2">
+              <button
+                className="flex-1 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-900 transition hover:bg-gray-100"
+                onClick={() => setShowForm(!showForm)}
+              >
+                {showForm ? "Cancel" : `+ Create ${eventLabel}`}
+              </button>
+              <button
+                type="button"
+                onClick={() => fetchAiEvents(true)}
+                disabled={aiLoading || hangoutsLoading}
+                className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+                aria-label="Refresh hang outs"
+              >
+                <span className="mr-2 text-base leading-none">⟳</span>
+                Refresh
+              </button>
+            </div>
+          </div>
 
-              {showForm && (
+          {showForm && (
                 <EventForm 
                   onSubmit={handleSubmit} 
                   onCancel={() => setShowForm(false)}
