@@ -2,6 +2,8 @@
 
 import { z } from 'zod';
 
+export {};
+
 const colors = {
   green: '\x1b[32m',
   red: '\x1b[31m',

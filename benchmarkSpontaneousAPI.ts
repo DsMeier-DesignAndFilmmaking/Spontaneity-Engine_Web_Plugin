@@ -1,5 +1,7 @@
 #!/usr/bin/env ts-node
 
+export {};
+
 type EndpointResult = {
   name: string;
   url: string;
