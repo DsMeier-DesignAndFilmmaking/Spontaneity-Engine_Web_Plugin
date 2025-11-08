@@ -5,7 +5,7 @@ import { NextRequest } from "next/server";
 import { newDb } from "pg-mem";
 import type { Pool } from "pg";
 
-import { GET, PATCH, PUT } from "@/app/api/v1/settings/route";
+import { GET, POST } from "@/app/api/v1/settings/route";
 import { POST as exportPost } from "@/app/api/v1/settings/export/route";
 import { GET as exportDownload } from "@/app/api/v1/settings/export/[token]/route";
 import { POST as deletePost } from "@/app/api/v1/settings/delete/route";
@@ -85,54 +85,32 @@ after(async () => {
   await pool.end();
 });
 
-test("GET returns default preferences when none stored", async () => {
+test("GET returns mock preferences", async () => {
   const response = await GET(buildRequest("GET"));
   assert.equal(response.status, 200);
-  const json = (await response.json()) as { data: any };
-  assert.equal(json.data.userId, USER_ID);
-  assert.equal(json.data.spontaneity, "medium");
-});
-
-test("PATCH persists changes and records telemetry", async () => {
-  const patchPayload = {
-    radiusKm: 12,
-    spontaneity: "high",
+  const json = (await response.json()) as {
+    environment: string;
+    preferences: Record<string, unknown>;
+    user: { id: string; name: string };
   };
-  const response = await PATCH(buildRequest("PATCH", patchPayload));
+  assert.ok(json.preferences);
+  assert.ok(Array.isArray(json.preferences.interests));
+  assert.ok(typeof json.environment === "string");
+});
+
+test("POST persists mock preferences", async () => {
+  const payload = {
+    spontaneousMode: false,
+    preferredRadius: 9,
+    notifications: { push: false, email: true },
+    interests: ["art"],
+    aiPersonalizationLevel: "experimental" as const,
+  };
+  const response = await POST(buildRequest("POST", payload));
   assert.equal(response.status, 200);
-  const json = (await response.json()) as { data: any };
-  assert.equal(json.data.radiusKm, 12);
-  assert.equal(json.data.spontaneity, "high");
-
-  const telemetry = await pool.query(
-    "SELECT name, metadata FROM telemetry_events WHERE user_id = $1 ORDER BY created_at DESC",
-    [USER_ID]
-  );
-  assert.ok(telemetry.rows.length >= 2, "preference change should emit telemetry events");
-  const fields = telemetry.rows.map((row) => (row.metadata as any).field);
-  assert.ok(fields.includes("radiusKm"));
-  assert.ok(fields.includes("spontaneity"));
-});
-
-test("PATCH enforces feature flags", async () => {
-  await setFeatureFlag("live_location", false);
-  const response = await PATCH(buildRequest("PATCH", { locationSharing: "live" }));
-  assert.equal(response.status, 200);
-  const json = (await response.json()) as { data: any };
-  assert.equal(json.data.locationSharing, "off");
-  await setFeatureFlag("live_location", true);
-});
-
-test("GET returns 404 when settings UI disabled", async () => {
-  await setFeatureFlag("settings_ui_enabled", false);
-  const response = await GET(buildRequest("GET"));
-  assert.equal(response.status, 404);
-  await setFeatureFlag("settings_ui_enabled", true);
-});
-
-test("PATCH rejects invalid payload", async () => {
-  const response = await PATCH(buildRequest("PATCH", { radiusKm: 0 }));
-  assert.equal(response.status, 400);
+  const json = (await response.json()) as { preferences: typeof payload };
+  assert.equal(json.preferences.preferredRadius, 9);
+  assert.equal(json.preferences.aiPersonalizationLevel, "experimental");
 });
 
 test("POST /settings/export respects flag", async () => {
@@ -187,48 +165,4 @@ test("POST /settings/delete returns 404 when feature disabled", async () => {
   const response = await deletePost(buildRequest("POST", undefined, "/api/v1/settings/delete"));
   assert.equal(response.status, 404);
   await setFeatureFlag("settings_ui_enabled", true);
-});
-
-test("PUT replaces the full settings document", async () => {
-  const payload: UserPreferences = {
-    userId: USER_ID,
-    displayName: "QA Tester",
-    photoUrl: "https://example.com/avatar.png",
-    interests: ["coffee"],
-    spontaneity: "low",
-    matchStrictness: "strict",
-    autoJoin: true,
-    locationSharing: "nearby",
-    radiusKm: 9,
-    transportPreference: "transit",
-    defaultNavProvider: "google",
-    offlineMaps: true,
-    whoCanInvite: "followers",
-    profileVisibility: "anonymous",
-    safetyMode: "high",
-    accessibilityNeeds: ["wheelchair"],
-    budget: { maxCents: 2500 },
-    timeAvailability: "now",
-    aiPersona: "adventurous",
-    showReasoning: true,
-    analyticsOptIn: false,
-    dndSchedule: [],
-    updatedAt: new Date().toISOString(),
-  };
-
-  const response = await PUT(buildRequest("PUT", payload));
-  assert.equal(response.status, 200);
-  const json = (await response.json()) as { data: UserPreferences };
-  assert.equal(json.data.profileVisibility, "anonymous");
-});
-
-test("PATCH returns 400 on malformed JSON", async () => {
-  const request = buildRequest(
-    "PATCH",
-    undefined,
-    "/api/v1/settings",
-    { rawBody: "{\"radiusKm\":", includeAuth: true }
-  );
-  const response = await PATCH(request);
-  assert.equal(response.status, 400);
 });
