@@ -241,7 +241,7 @@ export default function EventFeed({
       sorted.sort((a, b) => getEventDate(b).getTime() - getEventDate(a).getTime());
     }
 
-    return sorted;
+    return sorted.slice(0, 5);
   }, [aiEvents, hangouts, includeAI, showAIEvents, enableSorting, sortBy, userCoordinates]);
 
   const loading = authLoading || hangoutsLoading || aiLoading || locationLoading;
