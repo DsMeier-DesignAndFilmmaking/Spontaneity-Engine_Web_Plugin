@@ -1,6 +1,21 @@
 import { NextResponse } from "next/server";
-import { fetchSpontaneousData, MOCK_SOURCE_LABELS, SpontaneousQuery } from "@/lib/fetchSpontaneousData";
+
+import {
+  fetchSpontaneousData,
+  type SpontaneousCard,
+  type SpontaneousQuery,
+} from "@/lib/fetchSpontaneousData";
 import { storeSpontaneousCards } from "@/lib/storeToFirebase";
+
+import {
+  fetchOpenAISpontaneousCards,
+  mergeWithFallbackCards,
+  OPENAI_SOURCE_LABEL,
+} from "./openai";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const fetchCache = "force-no-store";
 
 interface SpontaneousRequestBody {
   location?: { lat?: number; lng?: number };
@@ -31,12 +46,37 @@ function validateRequestBody(body: SpontaneousRequestBody): SpontaneousQuery {
   };
 }
 
+async function resolveSuggestions(query: SpontaneousQuery): Promise<SpontaneousCard[]> {
+  let aiCards: SpontaneousCard[] = [];
+
+  try {
+    aiCards = await fetchOpenAISpontaneousCards(query);
+  } catch (error) {
+    console.warn("Failed to fetch OpenAI spontaneous suggestions. Falling back to mock data.", error);
+  }
+
+  if (aiCards.length >= 3) {
+    return aiCards;
+  }
+
+  const fallbackCards = await fetchSpontaneousData(query);
+  if (aiCards.length === 0) {
+    return fallbackCards;
+  }
+
+  return mergeWithFallbackCards(aiCards, fallbackCards);
+}
+
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as SpontaneousRequestBody;
     const query = validateRequestBody(body);
 
-    const cards = await fetchSpontaneousData(query);
+    const cards = await resolveSuggestions(query);
+
+    if (cards.length === 0) {
+      throw new Error("No spontaneous suggestions could be generated.");
+    }
 
     try {
       await storeSpontaneousCards(cards, query);
@@ -44,11 +84,22 @@ export async function POST(req: Request) {
       console.warn("Failed to persist spontaneous cards:", storeError);
     }
 
-    return NextResponse.json({
-      cards,
-      generatedAt: new Date().toISOString(),
-      source: [...MOCK_SOURCE_LABELS],
-    });
+    const sources = Array.from(
+      new Set(cards.map((card) => card.source ?? OPENAI_SOURCE_LABEL)),
+    ).sort();
+
+    return NextResponse.json(
+      {
+        cards,
+        generatedAt: new Date().toISOString(),
+        source: sources,
+      },
+      {
+        headers: {
+          "Cache-Control": "no-store, max-age=0",
+        },
+      },
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json(
@@ -60,5 +111,3 @@ export async function POST(req: Request) {
     );
   }
 }
-
-

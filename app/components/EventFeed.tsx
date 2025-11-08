@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Timestamp } from "firebase/firestore";
 import EventCard from "./EventCard";
 import EventForm from "./EventForm";
+import SpontaneousCardPanel from "./SpontaneousCardPanel";
 import Loader from "./Loader";
 import { useAuth } from "./AuthContext";
 import { Event, EventFormData } from "@/lib/types";
@@ -727,6 +728,8 @@ export default function EventFeed({
           {combinedErrorMessage}
         </div>
       )}
+
+      <SpontaneousCardPanel className="mb-4" preferences={tags} />
 
       {/* API Testing Controls - Only show if enabled */}
       {showTestingControls && (
