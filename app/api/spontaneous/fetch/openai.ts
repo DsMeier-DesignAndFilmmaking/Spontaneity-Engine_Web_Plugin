@@ -90,6 +90,7 @@ export async function fetchOpenAISpontaneousCards(query: SpontaneousQuery): Prom
     mood: query.mood ?? null,
     preferences: query.preferences ?? [],
     historyKey,
+    allowStaticFallback: false,
   });
 
   const mapped = events.map((event, index) => toCard(event, query.location, index));

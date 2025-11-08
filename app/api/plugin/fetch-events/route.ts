@@ -427,6 +427,7 @@ export async function GET(req: Request) {
                   aggregatedCards,
                   preferences: tags ?? undefined,
                   historyKey: tenantId ?? apiKey ?? null,
+                  allowStaticFallback: false,
                 });
 
                 aiEventsForResponse = generatedSuggestions.map((suggestion) => ({

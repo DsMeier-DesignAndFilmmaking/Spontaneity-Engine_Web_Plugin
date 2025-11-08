@@ -1,17 +1,9 @@
 import { NextResponse } from "next/server";
 
-import {
-  fetchSpontaneousData,
-  type SpontaneousCard,
-  type SpontaneousQuery,
-} from "@/lib/fetchSpontaneousData";
+import type { SpontaneousCard, SpontaneousQuery } from "@/lib/fetchSpontaneousData";
 import { storeSpontaneousCards } from "@/lib/storeToFirebase";
 
-import {
-  fetchOpenAISpontaneousCards,
-  mergeWithFallbackCards,
-  OPENAI_SOURCE_LABEL,
-} from "./openai";
+import { fetchOpenAISpontaneousCards, OPENAI_SOURCE_LABEL } from "./openai";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -47,24 +39,13 @@ function validateRequestBody(body: SpontaneousRequestBody): SpontaneousQuery {
 }
 
 async function resolveSuggestions(query: SpontaneousQuery): Promise<SpontaneousCard[]> {
-  let aiCards: SpontaneousCard[] = [];
-
   try {
-    aiCards = await fetchOpenAISpontaneousCards(query);
+    const aiCards = await fetchOpenAISpontaneousCards(query);
+    return aiCards.slice(0, 5);
   } catch (error) {
-    console.warn("Failed to fetch OpenAI spontaneous suggestions. Falling back to mock data.", error);
+    console.warn("Failed to fetch OpenAI spontaneous suggestions.", error);
+    return [];
   }
-
-  if (aiCards.length >= 3) {
-    return aiCards;
-  }
-
-  const fallbackCards = await fetchSpontaneousData(query);
-  if (aiCards.length === 0) {
-    return fallbackCards;
-  }
-
-  return mergeWithFallbackCards(aiCards, fallbackCards);
 }
 
 export async function POST(req: Request) {

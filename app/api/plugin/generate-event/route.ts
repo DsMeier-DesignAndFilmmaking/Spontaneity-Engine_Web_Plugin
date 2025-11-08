@@ -6,6 +6,7 @@ export async function POST(req: Request) {
     const { location } = await req.json();
     const suggestions = await generateLocalAISuggestions({
       location: location || "New York",
+      allowStaticFallback: false,
     });
     if (!suggestions.length) {
       throw new Error("No AI suggestions generated");

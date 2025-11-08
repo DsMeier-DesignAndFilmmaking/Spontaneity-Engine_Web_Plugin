@@ -3,10 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { SpontaneousCard } from "@/lib/fetchSpontaneousData";
-import { fetchSpontaneousSuggestions } from "@/lib/api/spontaneousClient";
 
-const MINIMUM_SUGGESTIONS = 3;
-const DISPLAY_LIMIT = 3;
+const DISPLAY_LIMIT = 5;
+const MINIMUM_SUGGESTIONS = 5;
 const FALLBACK_LOCATION = { lat: 40.7128, lng: -74.006 };
 
 function dedupeByTitle(cards: SpontaneousCard[]): SpontaneousCard[] {
@@ -42,12 +41,17 @@ export default function SpontaneousCardPanel({
   onSuggestionsChange,
 }: SpontaneousCardPanelProps) {
   const [cards, setCards] = useState<SpontaneousCard[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [location, setLocation] = useState(initialLocation ?? FALLBACK_LOCATION);
   const [locationResolved, setLocationResolved] = useState(Boolean(initialLocation));
 
   const requestIdRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const preferenceKey = useMemo(() => (preferences ?? []).map((pref) => pref.trim()).filter(Boolean).join("|"), [
+    preferences,
+  ]);
 
   useEffect(() => {
     if (initialLocation) {
@@ -61,10 +65,7 @@ export default function SpontaneousCardPanel({
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        setLocation({
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
-        });
+        setLocation({ lat: position.coords.latitude, lng: position.coords.longitude });
         setLocationResolved(true);
       },
       (geoError) => {
@@ -77,30 +78,162 @@ export default function SpontaneousCardPanel({
         maximumAge: 300000,
       },
     );
+
+    return () => {
+      abortRef.current?.abort();
+    };
   }, [initialLocation]);
 
-  const loadSuggestions = useCallback(
+  const streamSuggestions = useCallback(
     async (coords: { lat: number; lng: number }) => {
+      const controller = new AbortController();
+      abortRef.current?.abort();
+      abortRef.current = controller;
+
       const requestId = ++requestIdRef.current;
       setLoading(true);
       setError(null);
+      setCards([]);
+      onSuggestionsChange?.([]);
 
-      try {
-        const nextCards = await fetchSpontaneousSuggestions({
-          location: coords,
-          mood,
-          radius,
-          preferences,
-        });
+      const pushCard = (candidate: SpontaneousCard) => {
+        const card: SpontaneousCard = {
+          id: candidate.id ?? `openai-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          title: candidate.title ?? "AI Suggestion",
+          description: candidate.description ?? "A spontaneous local recommendation.",
+          category: candidate.category ?? "experience",
+          location: {
+            lat: candidate.location?.lat ?? coords.lat,
+            lng: candidate.location?.lng ?? coords.lng,
+            ...(candidate.location?.address ? { address: candidate.location.address } : {}),
+          },
+          startTime: candidate.startTime,
+          source: candidate.source ?? "OpenAI",
+        };
 
-        if (requestId !== requestIdRef.current) {
-          return;
+        setCards((prev) => dedupeByTitle([...prev, card]).slice(0, DISPLAY_LIMIT));
+      };
+
+      const state = {
+        started: false,
+        buffer: "",
+        depth: 0,
+        inString: false,
+        escape: false,
+        objectStart: -1,
+      };
+
+      const handleChunk = (chunk: string) => {
+        state.buffer += chunk;
+
+        if (!state.started) {
+          const idx = state.buffer.indexOf("[");
+          if (idx === -1) {
+            // Keep buffer small to avoid runaway growth before the array begins.
+            state.buffer = state.buffer.slice(-1);
+            return;
+          }
+          state.started = true;
+          state.buffer = state.buffer.slice(idx + 1);
         }
 
-        const deduped = dedupeByTitle(nextCards);
-        setCards(deduped);
+        for (let i = 0; i < state.buffer.length; i += 1) {
+          const char = state.buffer[i];
+
+          if (state.escape) {
+            state.escape = false;
+            continue;
+          }
+
+          if (char === "\\" && state.inString) {
+            state.escape = true;
+            continue;
+          }
+
+          if (char === '"') {
+            state.inString = !state.inString;
+            continue;
+          }
+
+          if (state.inString) {
+            continue;
+          }
+
+          if (char === "{") {
+            if (state.depth === 0) {
+              state.objectStart = i;
+            }
+            state.depth += 1;
+            continue;
+          }
+
+          if (char === "}") {
+            state.depth -= 1;
+            if (state.depth === 0 && state.objectStart !== -1) {
+              const objectString = state.buffer.slice(state.objectStart, i + 1);
+              try {
+                const parsed = JSON.parse(objectString) as SpontaneousCard;
+                if (requestId === requestIdRef.current) {
+                  pushCard(parsed);
+                }
+              } catch (parseError) {
+                console.warn("Failed to parse streamed suggestion object:", parseError);
+              }
+
+              state.buffer = state.buffer.slice(i + 1).replace(/^[\s,]*/, "");
+              state.objectStart = -1;
+              i = -1;
+            }
+            continue;
+          }
+
+          if (char === "]" && state.depth === 0) {
+            state.started = false;
+            state.buffer = "";
+            state.objectStart = -1;
+            state.inString = false;
+            state.escape = false;
+            break;
+          }
+        }
+      };
+
+      try {
+        const trimmedPreferences = preferenceKey
+          .split("|")
+          .map((value) => value.trim())
+          .filter(Boolean);
+
+        const response = await fetch("/api/spontaneous/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            location: coords,
+            mood,
+            radius,
+            preferences: trimmedPreferences,
+          }),
+          signal: controller.signal,
+        });
+
+        if (!response.ok || !response.body) {
+          throw new Error(`Generation failed (${response.status})`);
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) {
+            break;
+          }
+          if (!value) continue;
+          const chunk = decoder.decode(value, { stream: true });
+          handleChunk(chunk);
+        }
       } catch (err) {
-        if (requestId !== requestIdRef.current) {
+        if (controller.signal.aborted || requestId !== requestIdRef.current) {
           return;
         }
         const message = err instanceof Error ? err.message : "Unable to load AI suggestions.";
@@ -110,10 +243,11 @@ export default function SpontaneousCardPanel({
       } finally {
         if (requestId === requestIdRef.current) {
           setLoading(false);
+          abortRef.current = null;
         }
       }
     },
-    [mood, preferences, radius, onSuggestionsChange],
+    [mood, preferenceKey, radius, onSuggestionsChange],
   );
 
   useEffect(() => {
@@ -121,19 +255,17 @@ export default function SpontaneousCardPanel({
       return;
     }
 
-    void loadSuggestions(location);
-  }, [locationResolved, location, loadSuggestions]);
+    void streamSuggestions(location);
 
-  const displayCards = useMemo(() => {
-    const trimmed = dedupeByTitle(cards);
-    if (trimmed.length >= DISPLAY_LIMIT) {
-      return trimmed.slice(0, DISPLAY_LIMIT);
-    }
-    return trimmed;
-  }, [cards]);
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, [locationResolved, location.lat, location.lng, streamSuggestions]);
+
+  const displayCards = useMemo(() => dedupeByTitle(cards).slice(0, DISPLAY_LIMIT), [cards]);
 
   const handleRefresh = () => {
-    void loadSuggestions(location);
+    void streamSuggestions(location);
   };
 
   useEffect(() => {
@@ -144,12 +276,8 @@ export default function SpontaneousCardPanel({
     <section className={`border-b border-gray-200 bg-white/95 px-5 py-4 ${className}`}>
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">
-            AI Suggestions
-          </p>
-          <h3 className="text-lg font-semibold text-gray-900">
-            Spontaneous Ideas Near You
-          </h3>
+          <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">AI Suggestions</p>
+          <h3 className="text-lg font-semibold text-gray-900">Spontaneous Ideas Near You</h3>
           <p className="mt-1 text-xs text-gray-500">
             Regenerate anytime for fresh inspiration powered by OpenAI.
           </p>
@@ -175,7 +303,7 @@ export default function SpontaneousCardPanel({
       <div className="mt-4 space-y-3">
         {loading && (
           <div className="space-y-3">
-            {[0, 1, 2].map((index) => (
+            {Array.from({ length: DISPLAY_LIMIT }).map((_, index) => (
               <div
                 key={`skeleton-${index}`}
                 className="animate-pulse rounded-xl border border-gray-200 bg-white/70 p-3 shadow-sm"
@@ -189,9 +317,7 @@ export default function SpontaneousCardPanel({
         )}
 
         {!loading && displayCards.length === 0 && !error && (
-          <p className="text-sm text-gray-600">
-            No AI suggestions ready just yet. Try refreshing in a moment.
-          </p>
+          <p className="text-sm text-gray-600">No AI suggestions ready just yet. Try refreshing in a moment.</p>
         )}
 
         {!loading && displayCards.length > 0 && (
@@ -202,16 +328,14 @@ export default function SpontaneousCardPanel({
                 className="rounded-xl border border-gray-200 bg-white/95 p-3 shadow-sm transition hover:shadow-md"
               >
                 <div className="flex items-start justify-between gap-2">
-                  <h4 className="text-base font-semibold text-gray-900">
-                    {card.title}
-                  </h4>
+                  <h4 className="text-base font-semibold text-gray-900">{card.title}</h4>
                   <span className="shrink-0 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-semibold capitalize text-blue-700">
                     {card.category}
                   </span>
                 </div>
                 <p className="mt-2 text-sm text-gray-600">{card.description}</p>
                 <div className="mt-3 flex items-center justify-between text-xs text-gray-500">
-                  <span>{card.source ?? "AI Concierge"}</span>
+                  <span>{card.source ?? "OpenAI"}</span>
                   {card.startTime && <span>{card.startTime}</span>}
                 </div>
               </article>
@@ -221,9 +345,7 @@ export default function SpontaneousCardPanel({
       </div>
 
       {displayCards.length < MINIMUM_SUGGESTIONS && !loading && (
-        <p className="mt-3 text-xs text-gray-500">
-          Want different vibes? Tap refresh for another set of ideas.
-        </p>
+        <p className="mt-3 text-xs text-gray-500">Want different vibes? Tap refresh for another set of ideas.</p>
       )}
     </section>
   );

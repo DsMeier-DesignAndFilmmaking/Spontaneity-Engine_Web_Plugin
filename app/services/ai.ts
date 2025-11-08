@@ -40,6 +40,7 @@ export interface GenerateAISuggestionsOptions {
   preferences?: string[];
   historyKey?: string | null;
   recentOverride?: string[];
+  allowStaticFallback?: boolean;
 }
 
 const sanitizeText = (value?: string | null): string | undefined => {
@@ -280,11 +281,15 @@ export async function generateLocalAISuggestions({
   preferences = [],
   historyKey = null,
   recentOverride,
+  allowStaticFallback = true,
 }: GenerateAISuggestionsOptions): Promise<Event[]> {
   const apiKey = process.env.OPENAI_KEY || process.env.OPENAI_API_KEY;
 
   if (!apiKey) {
     console.warn("OpenAI API key not configured. Falling back to static AI suggestions.");
+    if (!allowStaticFallback) {
+      throw new Error("OpenAI API key not configured");
+    }
     return mapSuggestionsToEvents(FALLBACK_SUGGESTIONS, coordinates || FALLBACK_COORDS, tenantId);
   }
 
@@ -417,6 +422,9 @@ ${JSON.stringify(promptPayload, null, 2)}
     return mapped;
   } catch (error) {
     console.warn("Failed to generate AI suggestions:", error);
+    if (!allowStaticFallback) {
+      throw error instanceof Error ? error : new Error("Failed to generate AI suggestions");
+    }
     return mapSuggestionsToEvents(
       FALLBACK_SUGGESTIONS.map((suggestion) => ({
         ...suggestion,
