@@ -10,6 +10,12 @@ const DEFAULT_SNAPSHOT: FeatureFlagSnapshot = {
   live_location: { enabled: false, payload: null },
 };
 
+const DEFAULT_FLAG_ENABLED: Record<FeatureFlagKey, boolean> = {
+  settings_ui_enabled: true,
+  auto_join_v1: false,
+  live_location: false,
+};
+
 type FeatureFlagRecord = {
   key: string;
   enabled: boolean;
@@ -131,8 +137,8 @@ export async function ensureDefaultFlags(): Promise<void> {
       FLAG_KEYS.map((key) =>
         executor.query(
           `INSERT INTO feature_flags (key, enabled)
-           VALUES ($1, FALSE) ON CONFLICT (key) DO NOTHING`,
-          [key]
+           VALUES ($1, $2) ON CONFLICT (key) DO NOTHING`,
+          [key, DEFAULT_FLAG_ENABLED[key]]
         )
       )
     );

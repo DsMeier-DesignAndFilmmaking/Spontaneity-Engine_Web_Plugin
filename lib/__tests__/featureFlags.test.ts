@@ -32,8 +32,13 @@ after(async () => {
 test("feature flags default to disabled", async () => {
   await ensureDefaultFlags();
   const snapshot = await getFeatureFlagSnapshot();
-  Object.values(snapshot).forEach((flag) => {
-    assert.equal(flag.enabled, false);
+  const expected: Record<string, boolean> = {
+    settings_ui_enabled: true,
+    auto_join_v1: false,
+    live_location: false,
+  };
+  Object.entries(snapshot).forEach(([key, flag]) => {
+    assert.equal(flag.enabled, expected[key] ?? false);
   });
 });
 
