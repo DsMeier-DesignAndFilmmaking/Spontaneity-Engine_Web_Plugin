@@ -5,7 +5,7 @@ export type { FeatureFlagKey, FeatureFlagSnapshot } from "./feature-flag-types";
 const FLAG_KEYS: FeatureFlagKey[] = ["settings_ui_enabled", "auto_join_v1", "live_location"];
 
 const DEFAULT_SNAPSHOT: FeatureFlagSnapshot = {
-  settings_ui_enabled: { enabled: false, payload: null },
+  settings_ui_enabled: { enabled: true, payload: null },
   auto_join_v1: { enabled: false, payload: null },
   live_location: { enabled: false, payload: null },
 };
