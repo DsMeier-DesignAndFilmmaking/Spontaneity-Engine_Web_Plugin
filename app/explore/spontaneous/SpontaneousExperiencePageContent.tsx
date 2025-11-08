@@ -8,7 +8,9 @@ import Link from "next/link";
 import MapView from "@/app/components/MapView";
 import EventFeed from "@/app/components/EventFeed";
 import EventDetailPanel from "@/app/components/EventDetailPanel";
+import SpontaneousCardPanel from "@/app/components/SpontaneousCardPanel";
 import { Event } from "@/lib/types";
+import type { SpontaneousCard } from "@/lib/fetchSpontaneousData";
 import type { NavigationRoutePayload } from "@/lib/mapbox";
 
 export default function SpontaneousExperiencePageContent() {
@@ -25,6 +27,7 @@ export default function SpontaneousExperiencePageContent() {
   const [detailEvent, setDetailEvent] = useState<Event | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [activeRoute, setActiveRoute] = useState<NavigationRoutePayload | null>(null);
+  const [panelSuggestionIds, setPanelSuggestionIds] = useState<string[]>([]);
 
   const handleBack = useCallback(() => {
     if (typeof window !== "undefined" && window.history.length > 1) {
@@ -47,6 +50,10 @@ export default function SpontaneousExperiencePageContent() {
     },
     []
   );
+
+  const handlePanelSuggestionsChange = useCallback((cards: SpontaneousCard[]) => {
+    setPanelSuggestionIds(cards.map((card) => card.id));
+  }, []);
 
   const hasOnlyAIEvents = useMemo(
     () =>
@@ -212,6 +219,8 @@ export default function SpontaneousExperiencePageContent() {
               </div>
             </header>
 
+            <SpontaneousCardPanel onSuggestionsChange={handlePanelSuggestionsChange} />
+
             <div
               className="flex-1 overflow-hidden"
             >
@@ -233,6 +242,7 @@ export default function SpontaneousExperiencePageContent() {
                     aiBadgeText="🤖 AI Inspiration"
                     cacheDuration={5}
                     pollingInterval={45}
+                    ignoredAiEventIds={panelSuggestionIds}
                   />
                 </div>
               </div>

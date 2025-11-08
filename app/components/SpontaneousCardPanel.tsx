@@ -30,6 +30,7 @@ interface SpontaneousCardPanelProps {
   radius?: number;
   preferences?: string[];
   initialLocation?: { lat: number; lng: number };
+  onSuggestionsChange?: (cards: SpontaneousCard[]) => void;
 }
 
 export default function SpontaneousCardPanel({
@@ -38,6 +39,7 @@ export default function SpontaneousCardPanel({
   radius,
   preferences,
   initialLocation,
+  onSuggestionsChange,
 }: SpontaneousCardPanelProps) {
   const [cards, setCards] = useState<SpontaneousCard[]>([]);
   const [loading, setLoading] = useState(true);
@@ -104,13 +106,14 @@ export default function SpontaneousCardPanel({
         const message = err instanceof Error ? err.message : "Unable to load AI suggestions.";
         setError(message);
         setCards([]);
+        onSuggestionsChange?.([]);
       } finally {
         if (requestId === requestIdRef.current) {
           setLoading(false);
         }
       }
     },
-    [mood, preferences, radius],
+    [mood, preferences, radius, onSuggestionsChange],
   );
 
   useEffect(() => {
@@ -132,6 +135,10 @@ export default function SpontaneousCardPanel({
   const handleRefresh = () => {
     void loadSuggestions(location);
   };
+
+  useEffect(() => {
+    onSuggestionsChange?.(displayCards);
+  }, [displayCards, onSuggestionsChange]);
 
   return (
     <section className={`border-b border-gray-200 bg-white/95 px-5 py-4 ${className}`}>

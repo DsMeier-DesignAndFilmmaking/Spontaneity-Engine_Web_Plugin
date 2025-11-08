@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Timestamp } from "firebase/firestore";
 import EventCard from "./EventCard";
 import EventForm from "./EventForm";
-import SpontaneousCardPanel from "./SpontaneousCardPanel";
 import Loader from "./Loader";
 import { useAuth } from "./AuthContext";
 import { Event, EventFormData } from "@/lib/types";
@@ -71,6 +70,7 @@ interface EventFeedProps {
   aiBackgroundColor?: string; // Background color for AI event cards
   onNavigationRouteChange?: (payload: NavigationRoutePayload | null) => void;
   onMoreInfo?: (event: Event) => void;
+  ignoredAiEventIds?: string[];
 }
 
 const EARTH_RADIUS_METERS = 6_371_000;
@@ -127,6 +127,7 @@ export default function EventFeed({
   aiBackgroundColor = "#f5f3ff",
   onNavigationRouteChange = () => undefined,
   onMoreInfo,
+  ignoredAiEventIds = [],
 }: EventFeedProps) {
   const { user, loading: authLoading } = useAuth();
   const [showForm, setShowForm] = useState(false);
@@ -475,13 +476,16 @@ export default function EventFeed({
             (typeof event.id === "string" && event.id.startsWith("AI-")),
         );
 
-        if (aiOnly.length === 0) {
+        const idsToIgnore = new Set(ignoredAiEventIds);
+        const filteredAi = aiOnly.filter((event) => !idsToIgnore.has(event.id ?? ""));
+
+        if (filteredAi.length === 0) {
           console.log("⚠️ No AI events returned from API. Showing user-generated hangOuts only.");
         } else {
-          console.log("✅ AI events fetched:", aiOnly);
+          console.log("✅ AI events fetched:", filteredAi);
         }
 
-        setAiEvents(aiOnly);
+        setAiEvents(filteredAi);
         setAiError(null);
       } catch (error: unknown) {
         const message =
@@ -499,6 +503,7 @@ export default function EventFeed({
       includeAI,
       showAIEvents,
       buildQueryString,
+      ignoredAiEventIds,
     ],
   );
 
