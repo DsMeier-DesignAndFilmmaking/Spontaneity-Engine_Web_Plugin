@@ -1,3 +1,5 @@
+import { auth } from "@/lib/firebase";
+
 const TOKEN_STORAGE_KEYS = ["access_token", "id_token", "token"] as const;
 
 export class FetchWithAuthError extends Error {
@@ -42,13 +44,26 @@ function readTokenFromCookies(): string | null {
   return null;
 }
 
-function resolveToken(): string | null {
+async function resolveToken(): Promise<string | null> {
   if (typeof window === "undefined") return null;
+
   const fromLocal = readTokenFromStorage(window.localStorage);
   if (fromLocal) return fromLocal;
+
   const fromSession = readTokenFromStorage(window.sessionStorage);
   if (fromSession) return fromSession;
-  return readTokenFromCookies();
+
+  const fromCookies = readTokenFromCookies();
+  if (fromCookies) return fromCookies;
+
+  try {
+    const user = auth.currentUser;
+    if (!user) return null;
+    return await user.getIdToken();
+  } catch (error) {
+    console.warn("[fetchWithAuth] Unable to obtain Firebase ID token", error);
+    return null;
+  }
 }
 
 function ensureJsonHeaders(headers: Headers) {
@@ -77,7 +92,7 @@ export default async function fetchWithAuth<T = unknown>(
   const headers = new Headers(init.headers ?? {});
   ensureJsonHeaders(headers);
 
-  const token = resolveToken();
+  const token = await resolveToken();
   if (token && !headers.has("Authorization")) {
     headers.set("Authorization", `Bearer ${token}`);
   }
