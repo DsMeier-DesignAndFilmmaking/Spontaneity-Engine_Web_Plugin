@@ -1,8 +1,10 @@
 import { initializeApp, getApps, cert, App } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
+import { getAuth, Auth } from "firebase-admin/auth";
 
 let adminApp: App | null = null;
 let adminDb: FirebaseFirestore.Firestore | null = null;
+let adminAuth: Auth | null = null;
 
 /**
  * Initialize Firebase Admin SDK
@@ -80,10 +82,21 @@ export function getAdminDb() {
   return adminDb;
 }
 
+export function getAdminAuth() {
+  if (!adminAuth) {
+    const { app } = initializeAdmin();
+    if (!app) {
+      return null;
+    }
+    adminAuth = getAuth(app);
+  }
+  return adminAuth;
+}
+
 /**
  * Check if Admin SDK is available
  */
 export function isAdminAvailable(): boolean {
-  return adminDb !== null;
+  return getAdminAuth() !== null;
 }
 

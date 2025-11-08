@@ -1,5 +1,6 @@
 import { createHmac } from "crypto";
 import type { NextRequest } from "next/server";
+import { getAdminAuth } from "@/lib/firebase-admin";
 
 export class UnauthorizedError extends Error {
   status: number;
@@ -34,15 +35,15 @@ function base64UrlDecode(segment: string): string {
   return buffer.toString("utf8");
 }
 
-function verifyJwt(token: string): JwtPayload {
+function tryVerifyHmacJwt(token: string): JwtPayload | null {
   const secret = process.env.JWT_SECRET;
   if (!secret) {
-    throw new UnauthorizedError("Server misconfigured: missing JWT secret");
+    return null;
   }
 
   const parts = token.split(".");
   if (parts.length !== 3) {
-    throw new UnauthorizedError("Malformed bearer token");
+    return null;
   }
 
   const [encodedHeader, encodedPayload, signature] = parts;
@@ -51,7 +52,7 @@ function verifyJwt(token: string): JwtPayload {
     .digest("base64url");
 
   if (expected !== signature) {
-    throw new UnauthorizedError("Invalid bearer token signature");
+    return null;
   }
 
   const payloadJson = base64UrlDecode(encodedPayload);
@@ -60,18 +61,51 @@ function verifyJwt(token: string): JwtPayload {
   try {
     payload = JSON.parse(payloadJson) as JwtPayload;
   } catch {
-    throw new UnauthorizedError("Unable to parse token payload");
+    return null;
   }
 
   if (!payload.sub) {
-    throw new UnauthorizedError("Token missing subject");
+    return null;
   }
 
   if (payload.exp && Date.now() / 1000 > payload.exp) {
-    throw new UnauthorizedError("Token expired");
+    return null;
   }
 
   return payload;
+}
+
+async function tryVerifyFirebaseIdToken(token: string): Promise<JwtPayload | null> {
+  try {
+    const adminAuth = getAdminAuth();
+    if (!adminAuth) {
+      return null;
+    }
+    const decoded = await adminAuth.verifyIdToken(token);
+    return {
+      sub: decoded.uid,
+      email: decoded.email,
+      name: decoded.name,
+      scope: decoded.scope ?? decoded.roles ?? decoded.role ?? undefined,
+    } satisfies JwtPayload;
+  } catch (error) {
+    console.warn("Firebase token verification failed", error);
+    return null;
+  }
+}
+
+async function resolveJwtPayload(token: string): Promise<JwtPayload> {
+  const hmacPayload = tryVerifyHmacJwt(token);
+  if (hmacPayload) {
+    return hmacPayload;
+  }
+
+  const firebasePayload = await tryVerifyFirebaseIdToken(token);
+  if (firebasePayload) {
+    return firebasePayload;
+  }
+
+  throw new UnauthorizedError("Invalid bearer token");
 }
 
 function normalizeScopes(scope?: string | string[]): string[] {
@@ -91,7 +125,7 @@ export async function getUserFromReq(req: NextRequest): Promise<AuthenticatedUse
     throw new UnauthorizedError("Empty bearer token");
   }
 
-  const payload = verifyJwt(token);
+  const payload = await resolveJwtPayload(token);
 
   return {
     id: payload.sub,

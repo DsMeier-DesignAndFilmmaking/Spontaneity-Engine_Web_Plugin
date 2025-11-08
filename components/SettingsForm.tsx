@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { UserPreferences, Spontaneity, LocationSharing } from "@/types/settings";
 import type { FeatureFlagSnapshot } from "@/lib/feature-flag-types";
 import { enforcePreferenceFlags } from "@/lib/feature-flag-types";
+import { auth } from "@/lib/firebase";
+import { useAuth } from "@/app/components/AuthContext";
 
 const SPONTANEITY_SCALE: Spontaneity[] = ["low", "medium", "high"];
 const RADIUS_PRESETS = [3, 5, 10];
@@ -238,6 +240,66 @@ interface SettingsFormProps {
   featureFlags: FeatureFlagSnapshot;
 }
 
+type AuthFetchErrorCode = "AUTH_MISSING" | "HTTP_ERROR";
+
+type AuthFetchError = Error & {
+  code?: AuthFetchErrorCode;
+  status?: number;
+  payload?: unknown;
+};
+
+class MissingAuthTokenError extends Error {
+  code: AuthFetchErrorCode;
+  constructor() {
+    super("Missing authentication token");
+    this.name = "MissingAuthTokenError";
+    this.code = "AUTH_MISSING";
+  }
+}
+
+async function getAccessToken(forceRefresh = false): Promise<string | null> {
+  if (typeof window === "undefined") return null;
+  const currentUser = auth.currentUser;
+  if (!currentUser) return null;
+  try {
+    return await currentUser.getIdToken(forceRefresh);
+  } catch (error) {
+    console.error("Failed to obtain Firebase ID token", error);
+    return null;
+  }
+}
+
+async function authFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+  const token = await getAccessToken();
+  if (!token) {
+    throw new MissingAuthTokenError();
+  }
+
+  const headers = new Headers(init.headers ?? {});
+
+  if (init.body && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
+  headers.set("Authorization", `Bearer ${token}`);
+
+  const response = await fetch(input, {
+    ...init,
+    headers,
+  });
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => undefined);
+    const error = new Error(payload?.error || response.statusText) as AuthFetchError;
+    error.code = "HTTP_ERROR";
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+
+  return response;
+}
+
 export default function SettingsForm({ featureFlags }: SettingsFormProps) {
   const [preferences, setPreferences] = useState<UserPreferences | null>(null);
   const [loading, setLoading] = useState(true);
@@ -247,6 +309,7 @@ export default function SettingsForm({ featureFlags }: SettingsFormProps) {
   const debounceTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const { toastNode, showToast } = useToast();
   const [privacyModalOpen, setPrivacyModalOpen] = useState(false);
+  const { user, loading: authLoading } = useAuth();
   const autoJoinEnabled = featureFlags.auto_join_v1?.enabled ?? false;
   const liveLocationEnabled = featureFlags.live_location?.enabled ?? false;
 
@@ -256,12 +319,24 @@ export default function SettingsForm({ featureFlags }: SettingsFormProps) {
 
   useEffect(() => {
     let active = true;
+
     const loadPrefs = async () => {
-      try {
-        const response = await fetch("/api/v1/settings", { cache: "no-store" });
-        if (!response.ok) {
-          throw new Error(await response.text());
+      if (authLoading) {
+        return;
+      }
+
+      if (!user) {
+        if (active) {
+          setPreferences(null);
+          setLoading(false);
+          setError("Please sign in to manage your settings.");
         }
+        return;
+      }
+
+      try {
+        setError(null);
+        const response = await authFetch("/api/v1/settings", { cache: "no-store" });
         const json = (await response.json()) as { data: UserPreferences };
         if (active) {
           const sanitized = enforcePreferenceFlags(json.data, featureFlags);
@@ -275,34 +350,37 @@ export default function SettingsForm({ featureFlags }: SettingsFormProps) {
         }
       } catch (err) {
         console.error(err);
-        if (active) setError("Failed to load settings. Please try again.");
+        if (active) {
+          if ((err as AuthFetchError)?.code === "AUTH_MISSING") {
+            setError("Please sign in to manage your settings.");
+          } else {
+            const message = (err as AuthFetchError)?.payload && typeof (err as AuthFetchError)?.payload === "object"
+              ? ((err as AuthFetchError).payload as { error?: string }).error
+              : null;
+            setError(message || "Failed to load settings. Please try again.");
+          }
+        }
       } finally {
         if (active) setLoading(false);
       }
     };
 
-    loadPrefs();
+    void loadPrefs();
     return () => {
       active = false;
       Object.values(debounceTimers.current).forEach((timer) => clearTimeout(timer));
     };
-  }, [featureFlags, autoJoinEnabled, liveLocationEnabled]);
+  }, [featureFlags, autoJoinEnabled, liveLocationEnabled, authLoading, user]);
 
   const sendPatch = useCallback(
     async (partial: Partial<UserPreferences>, rollbackSnapshot: UserPreferences) => {
       try {
         setSaving(true);
         setError(null);
-        const response = await fetch("/api/v1/settings", {
+        const response = await authFetch("/api/v1/settings", {
           method: "PATCH",
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify(partial),
         });
-
-        if (!response.ok) {
-          const payload = await response.json().catch(() => ({ error: "Update failed" }));
-          throw new Error(payload.error || "Update failed");
-        }
 
         const json = (await response.json()) as { data: UserPreferences };
         setPreferences(enforcePreferenceFlags(json.data, featureFlags));
@@ -310,7 +388,11 @@ export default function SettingsForm({ featureFlags }: SettingsFormProps) {
       } catch (err) {
         console.error(err);
         setPreferences(rollbackSnapshot);
-        setError(err instanceof Error ? err.message : "Unable to save changes");
+        if ((err as AuthFetchError)?.code === "AUTH_MISSING") {
+          setError("Please sign in to update your settings.");
+        } else {
+          setError(err instanceof Error ? err.message : "Unable to save changes");
+        }
         showToast({ message: "Could not save", tone: "error" });
       } finally {
         setSaving(false);
@@ -385,21 +467,19 @@ export default function SettingsForm({ featureFlags }: SettingsFormProps) {
     setPreferences(defaults);
     try {
       setSaving(true);
-      const response = await fetch("/api/v1/settings", {
+      const response = await authFetch("/api/v1/settings", {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(defaults),
       });
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({ error: "Reset failed" }));
-        throw new Error(payload.error || "Reset failed");
-      }
       const json = (await response.json()) as { data: UserPreferences };
       setPreferences(enforcePreferenceFlags(json.data, featureFlags));
       showToast({ message: "Defaults restored", tone: "success" });
     } catch (err) {
       console.error(err);
       setPreferences(rollback);
+      if ((err as AuthFetchError)?.code === "AUTH_MISSING") {
+        setError("Please sign in to reset your settings.");
+      }
       showToast({ message: "Could not reset", tone: "error" });
     } finally {
       setSaving(false);
