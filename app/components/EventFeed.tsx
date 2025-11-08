@@ -734,8 +734,6 @@ export default function EventFeed({
         </div>
       )}
 
-      <SpontaneousCardPanel className="mb-4" preferences={tags} />
-
       {/* API Testing Controls - Only show if enabled */}
       {showTestingControls && (
         <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
