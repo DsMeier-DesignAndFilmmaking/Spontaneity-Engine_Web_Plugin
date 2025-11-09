@@ -2,38 +2,42 @@ import { NextResponse } from "next/server";
 import { submitEvent } from "@/app/services/events";
 import { getTenantId } from "@/app/services/tenant";
 import { checkRateLimit } from "@/app/services/rate-limit";
+import { extractTenantId, respondMissingTenantId } from "@/app/api/_utils/tenant";
 
 export async function POST(req: Request) {
   try {
-    let data;
-    try {
-      data = await req.json();
-    } catch (parseError) {
-      console.error("Failed to parse request body:", parseError);
-      return NextResponse.json(
-        { error: "Invalid JSON in request body", message: "Request body must be valid JSON" },
-        { status: 400 }
-      );
+    const { tenantId: extractedTenantId, sources } = await extractTenantId(
+      req,
+      "/app/api/plugin/submit-event",
+    );
+
+    let data: any;
+    if (sources.parsedBody && typeof sources.parsedBody === "object") {
+      data = sources.parsedBody;
+    } else {
+      try {
+        data = await req.json();
+      } catch (parseError) {
+        console.error("Failed to parse request body:", parseError);
+        return NextResponse.json(
+          { error: "Invalid JSON in request body", message: "Request body must be valid JSON" },
+          { status: 400 },
+        );
+      }
     }
 
-    const { userId, apiKey, tenantId: tenantIdParam, ...eventData } = data;
-    
-    // Extract API key from body or headers
+    const { userId, apiKey, tenantId: tenantIdParam, ...eventData } = data ?? {};
+
     const apiKeyFromHeader = req.headers.get("x-api-key");
     const apiKeyToUse = apiKey || apiKeyFromHeader;
-    
-    // Get tenantId from API key or direct parameter (server-side validation)
-    const tenantId = getTenantId(apiKeyToUse || undefined, tenantIdParam || undefined);
-    
+
+    const tenantId = getTenantId(apiKeyToUse || undefined, extractedTenantId || tenantIdParam || undefined);
+
     if (!tenantId) {
-      console.error("Authentication failed:", { apiKey: apiKeyToUse ? "provided" : "missing", tenantIdParam });
-      return NextResponse.json(
-        { error: "Authentication required", message: "Valid API key or tenantId is required" },
-        { status: 401 }
-      );
+      const traceSources = { ...sources, apiKey: apiKeyToUse ?? null };
+      return respondMissingTenantId("/app/api/plugin/submit-event", traceSources);
     }
 
-    // Rate limiting: Check request limit
     const rateLimitCheck = checkRateLimit(tenantId, "requests");
     if (!rateLimitCheck.allowed) {
       return NextResponse.json(
@@ -41,7 +45,7 @@ export async function POST(req: Request) {
           error: "Rate limit exceeded",
           message: `Too many requests. Limit: ${rateLimitCheck.limit} per minute. Reset at: ${new Date(rateLimitCheck.resetAt).toISOString()}`,
         },
-        { 
+        {
           status: 429,
           headers: {
             "X-RateLimit-Limit": rateLimitCheck.limit.toString(),
@@ -49,29 +53,26 @@ export async function POST(req: Request) {
             "X-RateLimit-Reset": rateLimitCheck.resetAt.toString(),
             "Retry-After": Math.ceil((rateLimitCheck.resetAt - Date.now()) / 1000).toString(),
           },
-        }
+        },
       );
     }
 
-    // GDPR: Validate consent if provided
-    if (eventData.consentGiven === false) {
+    if (eventData?.consentGiven === false) {
       return NextResponse.json(
         { error: "Consent required", message: "User consent is required for data processing" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     if (!userId) {
       return NextResponse.json(
         { error: "Authentication required", message: "User ID is required" },
-        { status: 401 }
+        { status: 401 },
       );
     }
-    
-    // Prepare event with userId as createdBy and tenantId
-    // Include consent flag for GDPR compliance
+
     const creator =
-      eventData.creator && typeof eventData.creator === "object"
+      eventData?.creator && typeof eventData.creator === "object"
         ? {
             uid:
               typeof eventData.creator.uid === "string" && eventData.creator.uid.trim().length > 0
@@ -89,11 +90,11 @@ export async function POST(req: Request) {
         : {
             uid: userId,
             name:
-              typeof eventData.creatorName === "string" && eventData.creatorName.trim().length > 0
+              typeof eventData?.creatorName === "string" && eventData.creatorName.trim().length > 0
                 ? eventData.creatorName.trim()
                 : undefined,
             profileImageUrl:
-              typeof eventData.creatorProfileImageUrl === "string" && eventData.creatorProfileImageUrl.trim().length > 0
+              typeof eventData?.creatorProfileImageUrl === "string" && eventData.creatorProfileImageUrl.trim().length > 0
                 ? eventData.creatorProfileImageUrl.trim()
                 : undefined,
           };
@@ -102,25 +103,23 @@ export async function POST(req: Request) {
       ...eventData,
       createdBy: userId,
       creator,
-      consentGiven: eventData.consentGiven ?? true, // Default to true if not provided
+      consentGiven: eventData?.consentGiven ?? true,
     };
 
-    // Validate required fields
     if (!event.title || !event.description || !event.location) {
       return NextResponse.json(
         { error: "Missing required fields", message: "Title, description, and location are required" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
-    // Validate location structure
     if (!event.location.lat || !event.location.lng) {
       return NextResponse.json(
         { error: "Invalid location", message: "Location must have both lat and lng" },
-        { status: 400 }
+        { status: 400 },
       );
     }
-    
+
     console.log("Submitting event with:", {
       tenantId,
       title: event.title,
@@ -128,7 +127,6 @@ export async function POST(req: Request) {
       hasUserId: !!userId,
     });
 
-    console.log("Calling submitEvent with:", { tenantId, hasTitle: !!event.title });
     const result = await submitEvent(event, tenantId);
     const { id, ...rest } = result ?? {};
     console.log("submitEvent succeeded:", { id });
@@ -145,22 +143,24 @@ export async function POST(req: Request) {
     console.error("Error code:", errorLike.code);
     console.error("Error name:", errorLike.name);
     console.error("Error stack:", errorLike.stack);
-    
-    // Ensure we always return a valid JSON response
+
     const errorMessage =
-      (errorLike.message && errorLike.message.length > 0)
+      errorLike.message && errorLike.message.length > 0
         ? errorLike.message
-        : (typeof err === "string" && err.length > 0 ? err : "An unexpected error occurred");
+        : typeof err === "string" && err.length > 0
+        ? err
+        : "An unexpected error occurred";
     const errorCode = errorLike.code || "unknown";
-    
-    const statusCode = errorMessage.includes("required") || errorMessage.includes("Authentication") 
-      ? 400 
-      : errorMessage.includes("Unauthorized") || errorMessage.includes("Tenant")
-      ? 403
-      : errorMessage.includes("Permission denied") || errorMessage.includes("permission") || errorCode === "permission-denied"
-      ? 403
-      : 500;
-    
+
+    const statusCode =
+      errorMessage.includes("required") || errorMessage.includes("Authentication")
+        ? 400
+        : errorMessage.includes("Unauthorized") || errorMessage.includes("Tenant")
+        ? 403
+        : errorMessage.includes("Permission denied") || errorMessage.includes("permission") || errorCode === "permission-denied"
+        ? 403
+        : 500;
+
     type ErrorResponse = {
       error: string;
       message: string;
@@ -177,8 +177,7 @@ export async function POST(req: Request) {
       message: errorMessage,
       code: errorCode,
     };
-    
-    // Add debug details in development
+
     if (process.env.NODE_ENV === "development") {
       const fullError =
         typeof err === "object" && err !== null
@@ -190,7 +189,7 @@ export async function POST(req: Request) {
         fullError,
       };
     }
-    
+
     console.error("Returning error response:", errorResponse);
     return NextResponse.json(errorResponse, { status: statusCode });
   }

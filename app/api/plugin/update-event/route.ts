@@ -2,31 +2,63 @@ import { NextResponse } from "next/server";
 import { updateEvent } from "@/app/services/events";
 import { getTenantId } from "@/app/services/tenant";
 import { checkRateLimit } from "@/app/services/rate-limit";
+import { extractTenantId, respondMissingTenantId } from "@/app/api/_utils/tenant";
 
 export async function PATCH(req: Request) {
   try {
-    const { searchParams } = new URL(req.url);
-    const body = await req.json();
-    
-    const { id, eventId, updates, userId, apiKey, tenantId: tenantIdParam } = body;
-    const actualId = id || eventId;
-    
-    // Extract API key from query params or headers
-    const apiKeyFromQuery = searchParams.get("apiKey");
-    const apiKeyFromHeader = req.headers.get("x-api-key");
-    const apiKeyToUse = apiKey || apiKeyFromQuery || apiKeyFromHeader;
-    
-    // Get tenantId from API key or direct parameter (server-side validation)
-    const tenantId = getTenantId(apiKeyToUse || undefined, tenantIdParam || undefined);
-    
-    if (!tenantId) {
+    const { tenantId: extractedTenantId, sources } = await extractTenantId(
+      req,
+      "/app/api/plugin/update-event",
+    );
+
+    let payload: any;
+    if (sources.parsedBody && typeof sources.parsedBody === "object") {
+      payload = sources.parsedBody;
+    } else {
+      try {
+        payload = await req.json();
+      } catch (parseError) {
+        console.error("Failed to parse request body:", parseError);
+        return NextResponse.json(
+          { error: "Invalid JSON in request body", message: "Request body must be valid JSON" },
+          { status: 400 },
+        );
+      }
+    }
+
+    const { eventId, updates, userId, apiKey, tenantId: tenantIdParam } = payload ?? {};
+
+    if (!eventId || typeof eventId !== "string") {
       return NextResponse.json(
-        { error: "Authentication required", message: "Valid API key or tenantId is required" },
-        { status: 401 }
+        { error: "Invalid eventId", message: "eventId must be provided" },
+        { status: 400 },
       );
     }
 
-    // Rate limiting: Check request limit
+    if (!userId || typeof userId !== "string") {
+      return NextResponse.json(
+        { error: "Authentication required", message: "User ID is required" },
+        { status: 401 },
+      );
+    }
+
+    if (!updates || typeof updates !== "object") {
+      return NextResponse.json(
+        { error: "Invalid updates", message: "Updates must be an object" },
+        { status: 400 },
+      );
+    }
+
+    const apiKeyFromHeader = req.headers.get("x-api-key");
+    const apiKeyToUse = apiKey || apiKeyFromHeader;
+
+    const tenantId = getTenantId(apiKeyToUse || undefined, extractedTenantId || tenantIdParam || undefined);
+
+    if (!tenantId) {
+      const traceSources = { ...sources, apiKey: apiKeyToUse ?? null };
+      return respondMissingTenantId("/app/api/plugin/update-event", traceSources);
+    }
+
     const rateLimitCheck = checkRateLimit(tenantId, "requests");
     if (!rateLimitCheck.allowed) {
       return NextResponse.json(
@@ -34,7 +66,7 @@ export async function PATCH(req: Request) {
           error: "Rate limit exceeded",
           message: `Too many requests. Limit: ${rateLimitCheck.limit} per minute. Reset at: ${new Date(rateLimitCheck.resetAt).toISOString()}`,
         },
-        { 
+        {
           status: 429,
           headers: {
             "X-RateLimit-Limit": rateLimitCheck.limit.toString(),
@@ -42,37 +74,19 @@ export async function PATCH(req: Request) {
             "X-RateLimit-Reset": rateLimitCheck.resetAt.toString(),
             "Retry-After": Math.ceil((rateLimitCheck.resetAt - Date.now()) / 1000).toString(),
           },
-        }
+        },
       );
     }
-    
-    if (!actualId) {
-      return NextResponse.json({ error: "Missing event ID" }, { status: 400 });
-    }
-    
-    if (!userId) {
-      return NextResponse.json(
-        { error: "Authentication required", message: "User ID is required" },
-        { status: 401 }
-      );
-    }
-    
-    await updateEvent(actualId, updates, tenantId);
-    return NextResponse.json({ success: true, message: "Event updated successfully" });
-  } catch (err: any) {
-    console.error(err);
-    
-    // Handle specific errors
-    if (err.message?.includes("Unauthorized") || err.message?.includes("Tenant mismatch")) {
-      return NextResponse.json({ error: err.message }, { status: 403 });
-    }
-    if (err.message?.includes("not found")) {
-      return NextResponse.json({ error: err.message }, { status: 404 });
-    }
-    
-    return NextResponse.json(
-      { error: "Failed to update event", message: err.message },
-      { status: 500 }
-    );
+
+    await updateEvent(eventId, updates, tenantId);
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    console.error("=== UPDATE EVENT ERROR ===", err);
+    const message = err instanceof Error ? err.message : "Failed to update event";
+    const status = message.toLowerCase().includes("permission") ? 403 : 500;
+    return NextResponse.json({ error: "Failed to update event", message }, { status });
   }
 }
+
+
+

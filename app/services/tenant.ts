@@ -61,6 +61,70 @@ export function getTenantId(apiKey?: string | null, tenantId?: string | null): s
   return null;
 }
 
+export interface TenantExtractionResult {
+  tenantId?: string;
+  bodyTenantId?: string | null;
+  queryTenantId?: string | null;
+  headerTenantId?: string | null;
+  parsedBody?: unknown;
+}
+
+export async function extractTenantIdFromRequest(req: Request): Promise<TenantExtractionResult> {
+  let bodyTenantId: string | null | undefined;
+  let parsedBody: unknown;
+
+  try {
+    const cloned = req.clone();
+    const text = await cloned.text();
+    if (text) {
+      try {
+        parsedBody = JSON.parse(text);
+        if (parsedBody && typeof parsedBody === "object") {
+          bodyTenantId = (parsedBody as Record<string, unknown>).tenantId as string | null | undefined;
+        }
+      } catch (parseError) {
+        console.warn("⚠️ Failed to parse request body while extracting tenantId:", parseError);
+      }
+    }
+  } catch (cloneError) {
+    console.warn("⚠️ Failed to clone request while extracting tenantId:", cloneError);
+  }
+
+  let queryTenantId: string | null = null;
+  try {
+    const url = new URL(req.url);
+    queryTenantId = url.searchParams.get("tenantId");
+  } catch (urlError) {
+    console.warn("⚠️ Failed to parse request URL while extracting tenantId:", urlError);
+  }
+
+  const headerTenantId = req.headers.get("x-tenant-id");
+  const resolvedTenantId = bodyTenantId || queryTenantId || headerTenantId || undefined;
+
+  let path = "unknown";
+  try {
+    path = new URL(req.url).pathname;
+  } catch {
+    // ignore path parsing errors
+  }
+
+  console.log("[TRACE tenantId]", {
+    path,
+    bodyTenantId,
+    queryTenantId,
+    headerTenantId,
+    resolvedTenantId,
+  });
+
+  return {
+    tenantId: resolvedTenantId,
+    bodyTenantId,
+    queryTenantId,
+    headerTenantId,
+    parsedBody,
+  };
+}
+
 /**
  * Get tenant-specific AI prompt template
  */

@@ -4,6 +4,7 @@ import { generateLocalAISuggestions, type WeatherContext } from "@/app/services/
 import { getTenantId } from "@/app/services/tenant";
 import { checkRateLimit } from "@/app/services/rate-limit";
 import { fetchSpontaneousData, type SpontaneousCard } from "@/lib/fetchSpontaneousData";
+import { extractTenantId, respondMissingTenantId } from "@/app/api/_utils/tenant";
 
 // Enhanced in-memory cache for AI events with incremental updates support
 interface CacheEntry {
@@ -225,26 +226,19 @@ export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
 
-    // Extract API key or tenantId from query params or headers
     const apiKey = searchParams.get("apiKey") || req.headers.get("x-api-key");
-    const tenantIdParam = searchParams.get("tenantId");
-    
-    // Validate API key and get tenantId (server-side validation)
-    const tenantId = getTenantId(apiKey || undefined, tenantIdParam || undefined);
-    
+    const tenantParam = searchParams.get("tenantId");
+    const { tenantId: extractedTenantId, sources } = await extractTenantId(
+      req,
+      "/app/api/plugin/fetch-events",
+    );
+    const tenantId = getTenantId(apiKey || undefined, extractedTenantId || tenantParam || undefined);
+
     if (!tenantId) {
-      return NextResponse.json(
-        {
-          error: "Authentication required",
-          message: "Valid API key or tenantId is required",
-          events: [],
-          meta: {},
-        },
-        { status: 401 }
-      );
+      const traceSources = { ...sources, apiKey: apiKey ?? null, queryTenantId: tenantParam ?? sources.queryTenantId };
+      return respondMissingTenantId("/app/api/plugin/fetch-events", traceSources);
     }
 
-    // Rate limiting: Check general request limit
     const rateLimitCheck = checkRateLimit(tenantId, "requests");
     if (!rateLimitCheck.allowed) {
       return NextResponse.json(
@@ -259,7 +253,7 @@ export async function GET(req: Request) {
             limit: rateLimitCheck.limit,
           },
         },
-        { 
+        {
           status: 429,
           headers: {
             "X-RateLimit-Limit": rateLimitCheck.limit.toString(),
@@ -271,7 +265,7 @@ export async function GET(req: Request) {
       );
     }
 
-    // Parse query parameters
+// Parse query parameters
     const limit = searchParams.get("limit") 
       ? parseInt(searchParams.get("limit")!, 10) 
       : 50;
