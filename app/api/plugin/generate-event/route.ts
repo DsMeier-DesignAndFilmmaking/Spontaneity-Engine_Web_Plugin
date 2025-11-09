@@ -18,7 +18,27 @@ export async function POST(req: Request) {
       payload = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
     }
 
-    const location = payload.location;
+    const rawLocation = payload.location;
+    let locationString: string | null = null;
+    let coordinates: { lat: number; lng: number } | null = null;
+
+    if (typeof rawLocation === "string") {
+      const trimmed = rawLocation.trim();
+      if (trimmed.length > 0) {
+        locationString = trimmed;
+      }
+    } else if (
+      rawLocation &&
+      typeof rawLocation === "object" &&
+      typeof (rawLocation as { lat?: unknown }).lat === "number" &&
+      typeof (rawLocation as { lng?: unknown }).lng === "number"
+    ) {
+      const lat = (rawLocation as { lat: number }).lat;
+      const lng = (rawLocation as { lng: number }).lng;
+      coordinates = { lat, lng };
+      locationString = `${lat}, ${lng}`;
+    }
+
     const tenantIdParam =
       typeof payload.tenantId === "string" && payload.tenantId.trim().length > 0 ? payload.tenantId.trim() : undefined;
     const apiKeyParam =
@@ -42,8 +62,9 @@ export async function POST(req: Request) {
     }
 
     const suggestions = await generateLocalAISuggestions({
-      location: location || "New York",
+      location: locationString ?? "New York",
       tenantId,
+      coordinates: coordinates ?? undefined,
       allowStaticFallback: false,
     });
     if (!suggestions.length) {
