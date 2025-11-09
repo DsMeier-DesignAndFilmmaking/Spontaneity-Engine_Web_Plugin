@@ -4,6 +4,49 @@ import { getTenantId } from "@/app/services/tenant";
 import { checkRateLimit } from "@/app/services/rate-limit";
 import { extractTenantId, respondMissingTenantId } from "@/app/api/_utils/tenant";
 
+type RawCreator = {
+  uid?: string;
+  name?: string;
+  profileImageUrl?: string;
+};
+
+type RawLocation =
+  | {
+      lat?: unknown;
+      lng?: unknown;
+      [key: string]: unknown;
+    }
+  | string
+  | null;
+
+type SubmitEventBody = {
+  userId?: string;
+  apiKey?: string;
+  tenantId?: string;
+  creator?: RawCreator;
+  creatorName?: string;
+  creatorProfileImageUrl?: string;
+  consentGiven?: boolean;
+  title?: string;
+  description?: string;
+  location?: RawLocation;
+  [key: string]: unknown;
+};
+
+type NormalizedEvent = {
+  title?: string;
+  description?: string;
+  location?: { lat: number; lng: number };
+  [key: string]: unknown;
+  createdBy: string;
+  creator: {
+    uid: string;
+    name?: string;
+    profileImageUrl?: string;
+  };
+  consentGiven: boolean;
+};
+
 export async function POST(req: Request) {
   try {
     const { tenantId: extractedTenantId, sources, parsedBody } = await extractTenantId(
@@ -32,18 +75,14 @@ export async function POST(req: Request) {
       apiKey,
       tenantId: tenantIdParam,
       creator,
-      ...eventData
-    } = data as {
-      userId?: string;
-      apiKey?: string;
-      tenantId?: string;
-      creator?: {
-        uid?: string;
-        name?: string;
-        profileImageUrl?: string;
-      };
-      [key: string]: unknown;
-    };
+      creatorName,
+      creatorProfileImageUrl,
+      consentGiven,
+      title,
+      description,
+      location,
+      ...additionalFields
+    } = data as SubmitEventBody;
 
     const creatorPayload = creator;
 
@@ -83,7 +122,7 @@ export async function POST(req: Request) {
       );
     }
 
-    if (eventData?.consentGiven === false) {
+    if (consentGiven === false) {
       return NextResponse.json(
         { error: "Consent required", message: "User consent is required for data processing" },
         { status: 400 },
@@ -97,6 +136,13 @@ export async function POST(req: Request) {
       );
     }
 
+    const fallbackCreatorName =
+      typeof creatorName === "string" && creatorName.trim().length > 0 ? creatorName.trim() : undefined;
+    const fallbackCreatorImage =
+      typeof creatorProfileImageUrl === "string" && creatorProfileImageUrl.trim().length > 0
+        ? creatorProfileImageUrl.trim()
+        : undefined;
+
     const eventCreator =
       creatorPayload && typeof creatorPayload === "object"
         ? {
@@ -107,29 +153,60 @@ export async function POST(req: Request) {
             name:
               typeof creatorPayload.name === "string" && creatorPayload.name.trim().length > 0
                 ? creatorPayload.name.trim()
-                : undefined,
+                : fallbackCreatorName,
             profileImageUrl:
               typeof creatorPayload.profileImageUrl === "string" && creatorPayload.profileImageUrl.trim().length > 0
                 ? creatorPayload.profileImageUrl.trim()
-                : undefined,
+                : fallbackCreatorImage,
           }
         : {
             uid: userId,
-            name:
-              typeof eventData?.creatorName === "string" && eventData.creatorName.trim().length > 0
-                ? eventData.creatorName.trim()
-                : undefined,
-            profileImageUrl:
-              typeof eventData?.creatorProfileImageUrl === "string" && eventData.creatorProfileImageUrl.trim().length > 0
-                ? eventData.creatorProfileImageUrl.trim()
-                : undefined,
+            name: fallbackCreatorName,
+            profileImageUrl: fallbackCreatorImage,
           };
 
-    const event = {
-      ...eventData,
+    const normalizedTitle =
+      typeof title === "string" && title.trim().length > 0 ? title.trim() : undefined;
+    const normalizedDescription =
+      typeof description === "string" && description.trim().length > 0 ? description.trim() : undefined;
+
+    const normalizedLocation = (() => {
+      if (!location) {
+        return undefined;
+      }
+      if (typeof location === "string") {
+        const match = location.match(/^(-?\d+\.?\d*),\s*(-?\d+\.?\d*)$/);
+        if (match) {
+          const lat = parseFloat(match[1]);
+          const lng = parseFloat(match[2]);
+          if (Number.isFinite(lat) && Number.isFinite(lng)) {
+            return { lat, lng };
+          }
+        }
+        return undefined;
+      }
+      if (
+        typeof location === "object" &&
+        typeof (location as { lat?: unknown }).lat === "number" &&
+        typeof (location as { lng?: unknown }).lng === "number"
+      ) {
+        const lat = (location as { lat: number }).lat;
+        const lng = (location as { lng: number }).lng;
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          return { lat, lng };
+        }
+      }
+      return undefined;
+    })();
+
+    const event: NormalizedEvent = {
+      ...additionalFields,
+      title: normalizedTitle,
+      description: normalizedDescription,
+      location: normalizedLocation,
       createdBy: userId,
       creator: eventCreator,
-      consentGiven: eventData?.consentGiven ?? true,
+      consentGiven: typeof consentGiven === "boolean" ? consentGiven : true,
     };
 
     if (!event.title || !event.description || !event.location) {
@@ -139,7 +216,12 @@ export async function POST(req: Request) {
       );
     }
 
-    if (!event.location.lat || !event.location.lng) {
+    if (
+      typeof event.location.lat !== "number" ||
+      typeof event.location.lng !== "number" ||
+      Number.isNaN(event.location.lat) ||
+      Number.isNaN(event.location.lng)
+    ) {
       return NextResponse.json(
         { error: "Invalid location", message: "Location must have both lat and lng" },
         { status: 400 },
