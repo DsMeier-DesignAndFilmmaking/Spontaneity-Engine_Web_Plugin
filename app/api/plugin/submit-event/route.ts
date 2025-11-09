@@ -31,12 +31,21 @@ export async function POST(req: Request) {
       userId,
       apiKey,
       tenantId: tenantIdParam,
+      creator,
       ...eventData
-    } = data as Record<string, unknown> & {
+    } = data as {
       userId?: string;
       apiKey?: string;
       tenantId?: string;
+      creator?: {
+        uid?: string;
+        name?: string;
+        profileImageUrl?: string;
+      };
+      [key: string]: unknown;
     };
+
+    const creatorPayload = creator;
 
     const apiKeyCandidate =
       (typeof apiKey === "string" && apiKey.trim().length > 0 ? apiKey.trim() : null) ??
@@ -88,20 +97,20 @@ export async function POST(req: Request) {
       );
     }
 
-    const creator =
-      eventData?.creator && typeof eventData.creator === "object"
+    const eventCreator =
+      creatorPayload && typeof creatorPayload === "object"
         ? {
             uid:
-              typeof eventData.creator.uid === "string" && eventData.creator.uid.trim().length > 0
-                ? eventData.creator.uid.trim()
+              typeof creatorPayload.uid === "string" && creatorPayload.uid.trim().length > 0
+                ? creatorPayload.uid.trim()
                 : userId,
             name:
-              typeof eventData.creator.name === "string" && eventData.creator.name.trim().length > 0
-                ? eventData.creator.name.trim()
+              typeof creatorPayload.name === "string" && creatorPayload.name.trim().length > 0
+                ? creatorPayload.name.trim()
                 : undefined,
             profileImageUrl:
-              typeof eventData.creator.profileImageUrl === "string" && eventData.creator.profileImageUrl.trim().length > 0
-                ? eventData.creator.profileImageUrl.trim()
+              typeof creatorPayload.profileImageUrl === "string" && creatorPayload.profileImageUrl.trim().length > 0
+                ? creatorPayload.profileImageUrl.trim()
                 : undefined,
           }
         : {
@@ -119,7 +128,7 @@ export async function POST(req: Request) {
     const event = {
       ...eventData,
       createdBy: userId,
-      creator,
+      creator: eventCreator,
       consentGiven: eventData?.consentGiven ?? true,
     };
 
