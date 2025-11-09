@@ -128,7 +128,7 @@ export default function EventFeed({
   onNavigationRouteChange = () => undefined,
   onMoreInfo,
 }: EventFeedProps) {
-  const { user, loading: authLoading } = useAuth();
+  const { user } = useAuth();
   const [showForm, setShowForm] = useState(false);
   const [notification, setNotification] = useState<{
     type: "success" | "error";
@@ -245,7 +245,8 @@ export default function EventFeed({
     return sorted.slice(0, 5);
   }, [aiEvents, hangouts, includeAI, showAIEvents, enableSorting, sortBy, userCoordinates]);
 
-  const loading = authLoading || hangoutsLoading || aiLoading || locationLoading || tenantResolving;
+  const loading = hangoutsLoading || (includeAI && showAIEvents && aiLoading) || tenantResolving;
+  const locationPending = locationLoading;
   const combinedErrorMessage = hangoutsError?.message || aiError || null;
 
   // Get user's current location on mount
@@ -785,6 +786,12 @@ export default function EventFeed({
           }`}
         >
           {notification.message}
+        </div>
+      )}
+
+      {locationPending && (
+        <div className="mb-4 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-700">
+          Updating your location… nearby hang outs may change shortly.
         </div>
       )}
 
