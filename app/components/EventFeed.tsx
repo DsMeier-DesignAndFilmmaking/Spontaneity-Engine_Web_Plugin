@@ -156,6 +156,8 @@ export default function EventFeed({
   const [useApiKey, setUseApiKey] = useState(!!defaultApiKey);
   const [tenantResolving, setTenantResolving] = useState(false);
 
+  const sanitizedApiKey = typeof apiKey === "string" ? apiKey.trim() : "";
+
   const [navigationLoading, setNavigationLoading] = useState(false);
   const { hangouts, loading: hangoutsLoading, error: hangoutsError } = useHangoutsFeed({
     tenantId: tenantId || undefined,
@@ -1032,8 +1034,6 @@ export default function EventFeed({
   if (loading) {
     return <p className="text-gray-900">Loading hang outs...</p>;
   }
-
-  const sanitizedApiKey = typeof apiKey === "string" ? apiKey.trim() : "";
 
   return (
     <div className="overflow-y-auto h-full pr-0 md:pr-2">
