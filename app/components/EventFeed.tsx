@@ -10,22 +10,14 @@ import { Event, EventFormData } from "@/lib/types";
 import { getCurrentLocation } from "@/lib/hooks/useGeolocation";
 import { useHangoutsFeed } from "@/lib/hooks/useHangoutsFeed";
 import { getWalkingRoute, type NavigationRoutePayload } from "@/lib/mapbox";
-import { fetchAPI } from "@/lib/api/fetchAPI";
 
 type Hangout = Event;
 
-interface AISuggestion {
-  id: string;
+interface AiApiCard {
   title: string;
   description: string;
-  location: {
-    lat: number;
-    lng: number;
-  };
-  createdAt: Date;
-  startTime?: string;
-  tags?: string[];
-  source: "AI";
+  vibeTags: string[];
+  navigationLink?: string | null;
 }
 
 interface SubmitEventPayload extends EventFormData {
@@ -108,6 +100,33 @@ const asNumber = (value: unknown): number | null => {
   return null;
 };
 
+const sanitizeCardTitle = (value: unknown, index: number): string => {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed.length > 0) {
+      return trimmed.slice(0, 120);
+    }
+  }
+  return `AI Suggestion ${index + 1}`;
+};
+
+const sanitizeCardDescription = (value: unknown): string => {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed.length > 0) {
+      return trimmed;
+    }
+  }
+  return "A spontaneous local experience worth checking out.";
+};
+
+const normalizeNavigationLink = (value: unknown): string | null => {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return /^https?:\/\//i.test(trimmed) ? trimmed : null;
+};
+
 export default function EventFeed({
   onEventsChange,
   defaultApiKey,
@@ -148,7 +167,12 @@ export default function EventFeed({
   const [limit, setLimit] = useState(50);
 
   const [hangOuts, setHangOuts] = useState<Hangout[]>([]);
-  const [aiCard, setAiCard] = useState<AISuggestion | null>(null);
+  const [aiCards, setAiCards] = useState<Event[]>([]);
+  const [aiSourceBreakdown, setAiSourceBreakdown] = useState<{
+    openai: number;
+    gemini: number;
+    fallback: number;
+  } | null>(null);
   const [isAiLoading, setIsAiLoading] = useState(true);
   const [aiError, setAiError] = useState<string | null>(null);
   const [tenantId, setTenantId] = useState(defaultTenantId || "");
@@ -156,7 +180,6 @@ export default function EventFeed({
   const [useApiKey, setUseApiKey] = useState(!!defaultApiKey);
   const [tenantResolving, setTenantResolving] = useState(false);
   const resolvingTenantRef = useRef(false);
-  const openAiRateLimitedRef = useRef(false);
 
   const sanitizedApiKey = typeof apiKey === "string" ? apiKey.trim() : "";
 
@@ -412,29 +435,12 @@ export default function EventFeed({
     [showNotification, onNavigationRouteChange]
   );
 
-  // Build API query string
-  const fetchAiCard = useCallback(
+  const fetchAiSuggestions = useCallback(
     async (showLoading: boolean = false) => {
       if (!showAIEvents || !includeAI) {
-        setAiCard(null);
+        setAiCards([]);
+        setAiSourceBreakdown(null);
         setAiError(null);
-        setIsAiLoading(false);
-        return;
-      }
-
-      if (openAiRateLimitedRef.current) {
-        setAiCard(null);
-        setAiError("No AI Suggestions right now");
-        setIsAiLoading(false);
-        return;
-      }
-
-      const hasTenantAuth = !!(tenantId && tenantId.trim().length > 0);
-      const hasApiKeyAuth = useApiKey && sanitizedApiKey.length > 0;
-
-      if (!hasTenantAuth && !hasApiKeyAuth) {
-        setAiCard(null);
-        setAiError("Missing tenant or API credentials for AI suggestions.");
         setIsAiLoading(false);
         return;
       }
@@ -444,117 +450,114 @@ export default function EventFeed({
       }
       setAiError(null);
 
+      const fallbackCoordinates =
+        userCoordinates && typeof userCoordinates.lat === "number" && typeof userCoordinates.lng === "number"
+          ? userCoordinates
+          : { lat: 40.7128, lng: -74.006 };
+
       try {
-        const locationParam = userCoordinates
-          ? `${userCoordinates.lat}, ${userCoordinates.lng}`
-          : location;
-
-        const aggregatedCards = hangOuts.slice(0, 1).map((event) => {
-          const eventLocation =
-            event.location && typeof event.location === "object"
-              ? {
-                  lat: (event.location as { lat?: unknown }).lat,
-                  lng: (event.location as { lng?: unknown }).lng,
-                }
-              : undefined;
-
-          return {
-            title: event.title,
-            description: event.description,
-            category: event.tags?.[0] ?? "experience",
-            startTime: event.startTime,
-            location:
-              typeof eventLocation?.lat === "number" && typeof eventLocation?.lng === "number"
-                ? { lat: eventLocation.lat, lng: eventLocation.lng }
-                : undefined,
-          };
+        const params = new URLSearchParams({
+          lat: fallbackCoordinates.lat.toString(),
+          lon: fallbackCoordinates.lng.toString(),
         });
 
-        const requestBody: Record<string, unknown> = {
-          location: locationParam,
-          aggregatedCards,
-          preferences: tags,
-          cacheDuration,
-        };
+        const primaryMood = tags.find((tag) => tag && tag.trim().length > 0) ?? "spontaneous";
+        params.set("mood", primaryMood);
 
-        if (tenantId?.trim()) {
-          requestBody.tenantId = tenantId.trim();
-        } else if (hasApiKeyAuth) {
-          requestBody.apiKey = sanitizedApiKey;
+        const response = await fetch(`${apiBaseUrl}/api/spontaneous-cards?${params.toString()}`, {
+          method: "GET",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+        });
+
+        if (!response.ok) {
+          const textResponse = await response.text().catch(() => response.statusText);
+          throw new Error(textResponse || `Failed to load AI suggestions (${response.status})`);
         }
 
-        const aiResponse = await fetchAPI<{ suggestion: Event }>(
-          `${apiBaseUrl}/api/plugin/generate-event`,
-          "POST",
-          requestBody,
-          hasTenantAuth,
-        );
-
-        const suggestion = aiResponse.suggestion;
-        if (!suggestion) {
-          throw new Error("OpenAI did not return a suggestion");
-        }
-
-        const resolvedLocation = suggestion.location && typeof suggestion.location === "object"
-          ? {
-              lat: (suggestion.location as { lat?: unknown }).lat as number | undefined,
-              lng: (suggestion.location as { lng?: unknown }).lng as number | undefined,
-            }
-          : null;
-
-        const fallbackLocation =
-          userCoordinates && typeof userCoordinates.lat === "number" && typeof userCoordinates.lng === "number"
-            ? userCoordinates
-            : { lat: 40.7128, lng: -74.006 };
-
-        const aiCard: AISuggestion = {
-          id:
-            typeof suggestion.id === "string" && suggestion.id.trim().length > 0
-              ? suggestion.id.trim()
-              : `AI-${Date.now()}`,
-          title: suggestion.title ?? "AI Suggestion",
-          description: suggestion.description ?? "OpenAI recommendation",
-          location: {
-            lat: typeof resolvedLocation?.lat === "number" ? resolvedLocation.lat : fallbackLocation.lat,
-            lng: typeof resolvedLocation?.lng === "number" ? resolvedLocation.lng : fallbackLocation.lng,
-          },
-          createdAt: new Date(),
-          startTime: suggestion.startTime,
-          tags: Array.isArray(suggestion.tags)
-            ? suggestion.tags.filter((tag): tag is string => typeof tag === "string")
-            : undefined,
-          source: "AI",
+        const payload = (await response.json()) as {
+          aiCards?: AiApiCard[];
+          sources?: { openai?: number; gemini?: number; fallback?: number };
+          diagnostics?: { errors?: string[] };
         };
 
-        setAiCard(aiCard);
+        const cards = Array.isArray(payload?.aiCards) ? payload.aiCards : [];
+
+        const mappedCards: Event[] = cards
+          .map((card, index) => {
+            const title = sanitizeCardTitle(card?.title, index);
+            const description = sanitizeCardDescription(card?.description);
+            const vibeTags = Array.isArray(card?.vibeTags)
+              ? card.vibeTags
+                  .map((tag) => (typeof tag === "string" ? tag.trim() : ""))
+                  .filter((tag) => tag.length > 0)
+                  .slice(0, 4)
+              : [];
+            const navigationLink = normalizeNavigationLink(card?.navigationLink);
+
+            const decoratedDescription = navigationLink
+              ? `${description}
+
+Directions: ${navigationLink}`
+              : description;
+
+            return {
+              id: `AI-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 32)}-${index}-${Date.now()}`,
+              title,
+              description: decoratedDescription,
+              tags: vibeTags,
+              location: fallbackCoordinates,
+              createdBy: "ai",
+              createdAt: new Date(),
+              source: "AI" as const,
+              tenantId: tenantId || undefined,
+            } as Event;
+          })
+          .filter((card) => card.title.length > 0 && card.description.length > 0);
+
+        if (mappedCards.length === 0) {
+          setAiCards([]);
+          setAiSourceBreakdown(
+            payload?.sources
+              ? {
+                  openai: Number(payload.sources.openai ?? 0),
+                  gemini: Number(payload.sources.gemini ?? 0),
+                  fallback: Number(payload.sources.fallback ?? 0),
+                }
+              : null,
+          );
+          setAiError("No AI Suggestions at the moment");
+          return;
+        }
+
+        if (payload?.sources) {
+          setAiSourceBreakdown({
+            openai: Number(payload.sources.openai ?? 0),
+            gemini: Number(payload.sources.gemini ?? 0),
+            fallback: Number(payload.sources.fallback ?? 0),
+          });
+        } else {
+          setAiSourceBreakdown(null);
+        }
+
+        if (payload?.diagnostics?.errors?.length) {
+          console.warn("AI diagnostics", payload.diagnostics.errors);
+        }
+
+        setAiCards(mappedCards);
         setAiError(null);
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : "Failed to load AI suggestions.";
         console.error("AI suggestion fetch failed", error);
-        setAiCard(null);
-        if (message.toLowerCase().includes("rate limit")) {
-          openAiRateLimitedRef.current = true;
-          setAiError("No AI Suggestions right now");
-        } else {
-          setAiError(message);
-        }
+        setAiCards([]);
+        setAiSourceBreakdown(null);
+        setAiError(message);
       } finally {
         setIsAiLoading(false);
       }
-    }, [
-      apiBaseUrl,
-      includeAI,
-      showAIEvents,
-      tenantId,
-      useApiKey,
-      sanitizedApiKey,
-      userCoordinates,
-      location,
-      tags,
-      cacheDuration,
-      isAiLoading,
-      hangOuts,
-    ]);
+    },
+    [apiBaseUrl, includeAI, showAIEvents, isAiLoading, userCoordinates, tags, tenantId],
+  );
 
   // Notify parent when events change (after state update)
   useEffect(() => {
@@ -564,8 +567,8 @@ export default function EventFeed({
   }, [sortedHangouts, onEventsChange]);
 
   useEffect(() => {
-    fetchAiCard(true);
-  }, [fetchAiCard]);
+    fetchAiSuggestions(true);
+  }, [fetchAiSuggestions]);
 
   useEffect(() => {
     if (!useApiKey || sanitizedApiKey.length === 0) {
@@ -704,7 +707,7 @@ export default function EventFeed({
       setShowForm(false);
       
       // Refresh AI events (user events will stream via Firestore)
-      await fetchAiCard(false);
+      await fetchAiSuggestions(false);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to create hang out";
       showNotification("error", message);
@@ -755,7 +758,7 @@ export default function EventFeed({
       }
 
       showNotification("success", "Hang out updated successfully!");
-      await fetchAiCard(false);
+      await fetchAiSuggestions(false);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to update hang out";
       console.error("Update error:", err);
@@ -806,7 +809,7 @@ export default function EventFeed({
       }
 
       showNotification("success", "Hang out deleted successfully!");
-      await fetchAiCard(false);
+      await fetchAiSuggestions(false);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to delete hang out";
       console.error("Delete error:", err);
@@ -857,39 +860,37 @@ export default function EventFeed({
       )}
 
       {showAIEvents && includeAI && (
-        <div className="mb-4">
+        <div className="mb-4 space-y-3">
           {isAiLoading ? (
             <div className="animate-pulse rounded-xl border border-gray-200 bg-white/70 p-3 shadow-sm">
               <div className="h-4 w-3/4 rounded bg-gray-200" />
               <div className="mt-2 h-3 w-full rounded bg-gray-200" />
               <div className="mt-2 h-3 w-2/3 rounded bg-gray-200" />
             </div>
-          ) : aiCard ? (
-            <EventCard
-              event={{
-                id: aiCard.id,
-                title: aiCard.title,
-                description: aiCard.description,
-                tags: aiCard.tags ?? [],
-                location: aiCard.location,
-                createdBy: "ai",
-                createdAt: aiCard.createdAt,
-                source: aiCard.source,
-                startTime: aiCard.startTime,
-                tenantId: tenantId || undefined,
-              }}
-              aiBadgeText={aiBadgeText}
-              primaryColor={primaryColor}
-              aiBadgeColor={aiBadgeColor}
-              aiBadgeTextColor={aiBadgeTextColor}
-              aiBackgroundColor={aiBackgroundColor}
-              onMoreInfo={onMoreInfo}
-              onNavigate={handleNavigate}
-            />
+          ) : aiCards.length > 0 ? (
+            aiCards.map((card) => (
+              <EventCard
+                key={card.id}
+                event={card}
+                aiBadgeText={aiBadgeText}
+                primaryColor={primaryColor}
+                aiBadgeColor={aiBadgeColor}
+                aiBadgeTextColor={aiBadgeTextColor}
+                aiBackgroundColor={aiBackgroundColor}
+                onMoreInfo={onMoreInfo}
+                onNavigate={handleNavigate}
+              />
+            ))
           ) : (
             <div className="rounded-xl border border-gray-200 bg-white/95 p-3 text-sm text-gray-600 shadow-sm">
               {aiError ?? "No AI Suggestions right now."}
             </div>
+          )}
+
+          {aiSourceBreakdown && !isAiLoading && (
+            <p className="text-xs text-gray-500">
+              AI sources — OpenAI: {aiSourceBreakdown.openai ?? 0}, Gemini: {aiSourceBreakdown.gemini ?? 0}, Fallback: {aiSourceBreakdown.fallback ?? 0}
+            </p>
           )}
         </div>
       )}
@@ -1032,7 +1033,7 @@ export default function EventFeed({
             </div>
 
             <button
-              onClick={() => fetchAiCard(true)}
+              onClick={() => fetchAiSuggestions(true)}
               className="w-full px-3 py-1 text-sm bg-gray-600 text-white rounded hover:bg-gray-700"
             >
               Refresh Events
@@ -1053,7 +1054,7 @@ export default function EventFeed({
               </button>
               <button
                 type="button"
-                onClick={() => fetchAiCard(true)}
+                onClick={() => fetchAiSuggestions(true)}
                 disabled={isAiLoading || hangoutsLoading}
                 className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
                 aria-label="Refresh hang outs"
