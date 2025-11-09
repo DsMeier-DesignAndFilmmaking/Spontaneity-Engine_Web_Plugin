@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { submitEvent } from "@/app/services/events";
+import { submitEvent, type SubmitEventPayload } from "@/app/services/events";
 import { getTenantId } from "@/app/services/tenant";
 import { checkRateLimit } from "@/app/services/rate-limit";
 import { extractTenantId, respondMissingTenantId } from "@/app/api/_utils/tenant";
@@ -30,21 +30,9 @@ type SubmitEventBody = {
   title?: string;
   description?: string;
   location?: RawLocation;
+  tags?: unknown;
+  startTime?: unknown;
   [key: string]: unknown;
-};
-
-type NormalizedEvent = {
-  title?: string;
-  description?: string;
-  location?: { lat: number; lng: number };
-  [key: string]: unknown;
-  createdBy: string;
-  creator: {
-    uid: string;
-    name?: string;
-    profileImageUrl?: string;
-  };
-  consentGiven: boolean;
 };
 
 export async function POST(req: Request) {
@@ -81,6 +69,8 @@ export async function POST(req: Request) {
       title,
       description,
       location,
+      tags,
+      startTime,
       ...additionalFields
     } = data as SubmitEventBody;
 
@@ -143,32 +133,19 @@ export async function POST(req: Request) {
         ? creatorProfileImageUrl.trim()
         : undefined;
 
-    const eventCreator =
-      creatorPayload && typeof creatorPayload === "object"
-        ? {
-            uid:
-              typeof creatorPayload.uid === "string" && creatorPayload.uid.trim().length > 0
-                ? creatorPayload.uid.trim()
-                : userId,
-            name:
-              typeof creatorPayload.name === "string" && creatorPayload.name.trim().length > 0
-                ? creatorPayload.name.trim()
-                : fallbackCreatorName,
-            profileImageUrl:
-              typeof creatorPayload.profileImageUrl === "string" && creatorPayload.profileImageUrl.trim().length > 0
-                ? creatorPayload.profileImageUrl.trim()
-                : fallbackCreatorImage,
-          }
-        : {
-            uid: userId,
-            name: fallbackCreatorName,
-            profileImageUrl: fallbackCreatorImage,
-          };
-
     const normalizedTitle =
       typeof title === "string" && title.trim().length > 0 ? title.trim() : undefined;
     const normalizedDescription =
       typeof description === "string" && description.trim().length > 0 ? description.trim() : undefined;
+
+    const normalizedTags = Array.isArray(tags)
+      ? (tags as unknown[])
+          .filter((tag): tag is string => typeof tag === "string" && tag.trim().length > 0)
+          .map((tag) => tag.trim())
+      : [];
+
+    const normalizedStartTime =
+      typeof startTime === "string" && startTime.trim().length > 0 ? startTime.trim() : undefined;
 
     const normalizedLocation = (() => {
       if (!location) {
@@ -199,21 +176,48 @@ export async function POST(req: Request) {
       return undefined;
     })();
 
-    const event: NormalizedEvent = {
-      ...additionalFields,
-      title: normalizedTitle,
-      description: normalizedDescription,
-      location: normalizedLocation,
-      createdBy: userId,
-      creator: eventCreator,
-      consentGiven: typeof consentGiven === "boolean" ? consentGiven : true,
-    };
+    const eventCreator =
+      creatorPayload && typeof creatorPayload === "object"
+        ? {
+            uid:
+              typeof creatorPayload.uid === "string" && creatorPayload.uid.trim().length > 0
+                ? creatorPayload.uid.trim()
+                : userId,
+            name:
+              typeof creatorPayload.name === "string" && creatorPayload.name.trim().length > 0
+                ? creatorPayload.name.trim()
+                : fallbackCreatorName,
+            profileImageUrl:
+              typeof creatorPayload.profileImageUrl === "string" && creatorPayload.profileImageUrl.trim().length > 0
+                ? creatorPayload.profileImageUrl.trim()
+                : fallbackCreatorImage,
+          }
+        : {
+            uid: userId,
+            name: fallbackCreatorName,
+            profileImageUrl: fallbackCreatorImage,
+          };
 
-    if (!event.title || !event.description || !event.location) {
+    if (!normalizedTitle || !normalizedDescription || !normalizedLocation) {
       return NextResponse.json(
         { error: "Missing required fields", message: "Title, description, and location are required" },
         { status: 400 },
       );
+    }
+
+    const event: SubmitEventPayload = {
+      ...additionalFields,
+      title: normalizedTitle,
+      description: normalizedDescription,
+      tags: normalizedTags,
+      location: normalizedLocation,
+      createdBy: userId,
+      consentGiven: typeof consentGiven === "boolean" ? consentGiven : true,
+      creator: eventCreator,
+    };
+
+    if (normalizedStartTime) {
+      event.startTime = normalizedStartTime;
     }
 
     if (
