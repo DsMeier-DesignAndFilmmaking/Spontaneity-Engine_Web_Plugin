@@ -3,7 +3,21 @@ import { generateLocalAISuggestions } from "@/app/services/ai";
 import { getTenantId } from "@/app/services/tenant";
 import { extractTenantId, respondMissingTenantId } from "@/app/api/_utils/tenant";
 
+const RATE_LIMIT_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes
+const RATE_LIMIT_KEY = "__openaiRateLimitUntil";
+
+function isOpenAiRateLimited(): boolean {
+  const until = (globalThis as Record<string, unknown>)[RATE_LIMIT_KEY];
+  return typeof until === "number" && Date.now() < until;
+}
+
+function setOpenAiRateLimited() {
+  (globalThis as Record<string, unknown>)[RATE_LIMIT_KEY] = Date.now() + RATE_LIMIT_COOLDOWN_MS;
+}
+
 export async function POST(req: Request) {
+  let tenantIdForResponse: string | undefined;
+
   try {
     const { tenantId: extractedTenantId, sources, parsedBody } = await extractTenantId(
       req,
@@ -56,9 +70,16 @@ export async function POST(req: Request) {
       getTenantId(apiKeyCandidate || undefined, tenantIdParam ?? undefined) ??
       undefined;
 
+    tenantIdForResponse = tenantId;
+
     if (!tenantId) {
       const traceSources = { ...sources, apiKey: apiKeyCandidate };
       return respondMissingTenantId("/app/api/plugin/generate-event", traceSources);
+    }
+
+    if (isOpenAiRateLimited()) {
+      console.warn("[Spontaneous Generate] OpenAI rate limit previously reached – skipping call.");
+      return NextResponse.json({ suggestion: null, tenantId, rateLimited: true }, { status: 200 });
     }
 
     const suggestions = await generateLocalAISuggestions({
@@ -83,6 +104,15 @@ export async function POST(req: Request) {
       (error as { error?: { message?: string } })?.error?.message ??
       (error as { message?: string })?.message ??
       "Failed to generate AI event";
+
+    if (status === 429) {
+      setOpenAiRateLimited();
+      console.warn("[Spontaneous Generate] OpenAI rate limit reached.", message);
+      return NextResponse.json(
+        { suggestion: null, tenantId: tenantIdForResponse ?? null, rateLimited: true, message },
+        { status: 200 },
+      );
+    }
 
     console.error("[Spontaneous Generate] OpenAI request failed:", { status, error });
 

@@ -65,6 +65,18 @@ interface OpenWeatherResponse {
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const cache = new Map<string, { timestamp: number; payload: unknown }>();
 
+const RATE_LIMIT_COOLDOWN_MS = 10 * 60 * 1000; // 5 minutes, but cooldown longer to be safe
+const RATE_LIMIT_KEY = "__openaiRateLimitUntil";
+
+function isOpenAiRateLimited(): boolean {
+  const until = (globalThis as Record<string, unknown>)[RATE_LIMIT_KEY];
+  return typeof until === "number" && Date.now() < until;
+}
+
+function setOpenAiRateLimited() {
+  (globalThis as Record<string, unknown>)[RATE_LIMIT_KEY] = Date.now() + RATE_LIMIT_COOLDOWN_MS;
+}
+
 function buildCacheKey(lat: number, lon: number, mood: string | null | undefined) {
   const normalizedLat = lat.toFixed(3);
   const normalizedLon = lon.toFixed(3);
@@ -175,6 +187,10 @@ async function fetchWeather(lat: number, lon: number) {
 // --- 5. Call GPT to generate AI cards ---
 async function generateAICards(userContext: Record<string, unknown>, combinedData: unknown[]) {
   if (!OPENAI_API_KEY) return [];
+  if (isOpenAiRateLimited()) {
+    console.warn("[spontaneous-cards] OpenAI rate limit previously reached – skipping call.");
+    return [];
+  }
 
   const prompt = `
   You are a travel concierge.
@@ -206,6 +222,9 @@ async function generateAICards(userContext: Record<string, unknown>, combinedDat
   if (!response.ok) {
     const text = await response.text().catch(() => response.statusText);
     console.warn("[spontaneous-cards] OpenAI request failed", response.status, text);
+    if (response.status === 429) {
+      setOpenAiRateLimited();
+    }
     return [];
   }
 

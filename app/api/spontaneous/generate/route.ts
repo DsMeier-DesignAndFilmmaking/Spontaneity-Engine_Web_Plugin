@@ -2,6 +2,18 @@ import OpenAI from "openai";
 
 export const runtime = "edge";
 
+const RATE_LIMIT_COOLDOWN_MS = 10 * 60 * 1000;
+const RATE_LIMIT_KEY = "__openaiRateLimitUntil";
+
+function isOpenAiRateLimited(): boolean {
+  const until = (globalThis as Record<string, unknown>)[RATE_LIMIT_KEY];
+  return typeof until === "number" && Date.now() < until;
+}
+
+function setOpenAiRateLimited() {
+  (globalThis as Record<string, unknown>)[RATE_LIMIT_KEY] = Date.now() + RATE_LIMIT_COOLDOWN_MS;
+}
+
 interface GenerateSpontaneousRequest {
   location?: { lat?: number; lng?: number };
   mood?: string | null;
@@ -128,6 +140,14 @@ export async function POST(req: Request) {
     });
   }
 
+  if (isOpenAiRateLimited()) {
+    console.warn("[Spontaneous Generate] OpenAI rate limit previously reached – skipping call.");
+    return new Response(JSON.stringify([]), {
+      status: 200,
+      headers: { "Content-Type": "application/json", "Cache-Control": "no-cache" },
+    });
+  }
+
   const userPrompt = buildPrompt(requestData);
 
   try {
@@ -177,6 +197,22 @@ export async function POST(req: Request) {
       },
     });
   } catch (error) {
+    const status =
+      typeof (error as { status?: number }).status === "number"
+        ? (error as { status?: number }).status
+        : typeof (error as { code?: number }).code === "number"
+        ? (error as { code?: number }).code
+        : 500;
+
+    if (status === 429) {
+      setOpenAiRateLimited();
+      console.warn("[Spontaneous Generate] OpenAI rate limit reached.", error);
+      return new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "Content-Type": "application/json", "Cache-Control": "no-cache" },
+      });
+    }
+
     console.error("[Spontaneous Generate] OpenAI request failed:", error);
     return new Response(JSON.stringify({ error: "Failed to generate spontaneous suggestions." }), {
       status: 500,
