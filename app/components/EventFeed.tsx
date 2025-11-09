@@ -152,6 +152,7 @@ export default function EventFeed({
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [tenantId, setTenantId] = useState(defaultTenantId || "");
+  const [apiKey, setApiKey] = useState(defaultApiKey || "");
   const [useApiKey, setUseApiKey] = useState(!!defaultApiKey);
   const [tenantResolving, setTenantResolving] = useState(false);
 
@@ -298,6 +299,10 @@ export default function EventFeed({
     fetchUserLocation();
   }, []);
 
+  useEffect(() => {
+    setApiKey(defaultApiKey || "");
+  }, [defaultApiKey]);
+
   const showNotification = (type: "success" | "error", message: string) => {
     setNotification({ type, message });
     setTimeout(() => setNotification(null), 5000);
@@ -431,8 +436,8 @@ export default function EventFeed({
       params.set("tenantId", tenantId);
     }
     // Add tenant authentication
-    if (useApiKey && apiKey) {
-      params.set("apiKey", apiKey);
+    if (useApiKey && sanitizedApiKey.length > 0) {
+      params.set("apiKey", sanitizedApiKey);
     }
     return params.toString();
   }, [
@@ -445,7 +450,7 @@ export default function EventFeed({
     sortBy,
     tags,
     useApiKey,
-    apiKey,
+    sanitizedApiKey,
     cacheDuration,
   ]);
 
@@ -459,10 +464,10 @@ export default function EventFeed({
         return;
       }
 
-      if (useApiKey && apiKey && (!tenantId || tenantResolving)) {
+      if (useApiKey && sanitizedApiKey.length > 0 && (!tenantId || tenantResolving)) {
         console.log("⏳ Waiting for tenantId before streaming AI events", {
           hasTenantId: !!tenantId,
-          apiKey,
+          apiKey: sanitizedApiKey,
           tenantResolving,
         });
         aiStreamControllerRef.current?.abort();
@@ -743,7 +748,7 @@ export default function EventFeed({
       tenantId,
       aiLoading,
       useApiKey,
-      apiKey,
+      sanitizedApiKey,
       tenantResolving,
     ],
   );
@@ -766,7 +771,7 @@ export default function EventFeed({
   }, [fetchAiEvents]);
 
   useEffect(() => {
-    if (!useApiKey || !apiKey) {
+    if (!useApiKey || sanitizedApiKey.length === 0) {
       resolvingTenantRef.current = false;
       setTenantResolving(false);
       return;
@@ -789,12 +794,12 @@ export default function EventFeed({
 
     (async () => {
       try {
-        const url = `/api/plugin/resolve-tenant?apiKey=${encodeURIComponent(apiKey)}`;
+        const url = `/api/plugin/resolve-tenant?apiKey=${encodeURIComponent(sanitizedApiKey)}`;
         const response = await fetch(url, {
           method: "GET",
           headers: {
             "Content-Type": "application/json",
-            "x-api-key": apiKey,
+            "x-api-key": sanitizedApiKey,
           },
           signal: controller.signal,
           cache: "no-store",
@@ -830,7 +835,7 @@ export default function EventFeed({
     return () => {
       controller.abort();
     };
-  }, [useApiKey, apiKey, tenantId]);
+  }, [useApiKey, sanitizedApiKey, tenantId]);
 
   const handleSubmit = async (formData: EventFormData) => {
     if (!user) {
@@ -854,13 +859,13 @@ export default function EventFeed({
       };
 
       // Add tenant authentication - ensure we always have either apiKey or tenantId
-      if (useApiKey && apiKey) {
-        requestBody.apiKey = apiKey;
+      if (useApiKey && sanitizedApiKey.length > 0) {
+        requestBody.apiKey = sanitizedApiKey;
       } else if (tenantId) {
         requestBody.tenantId = tenantId;
       } else {
         // Default to demo key if no tenant specified (for testing)
-        requestBody.apiKey = defaultApiKey || "demo-key-1";
+        requestBody.apiKey = sanitizedApiKey || defaultApiKey || "demo-key-1";
       }
 
       console.log("Submitting event with request body:", {
@@ -934,8 +939,8 @@ export default function EventFeed({
       };
 
       // Add tenant authentication
-      if (useApiKey && apiKey) {
-        requestBody.apiKey = apiKey;
+      if (useApiKey && sanitizedApiKey.length > 0) {
+        requestBody.apiKey = sanitizedApiKey;
       } else if (tenantId) {
         requestBody.tenantId = tenantId;
       }
@@ -987,8 +992,8 @@ export default function EventFeed({
       deleteParams.set("userId", user.uid);
       
       // Add tenant authentication
-      if (useApiKey && apiKey) {
-        deleteParams.set("apiKey", apiKey);
+      if (useApiKey && sanitizedApiKey.length > 0) {
+        deleteParams.set("apiKey", sanitizedApiKey);
       } else if (tenantId) {
         deleteParams.set("tenantId", tenantId);
       }
@@ -1027,6 +1032,8 @@ export default function EventFeed({
   if (loading) {
     return <p className="text-gray-900">Loading hang outs...</p>;
   }
+
+  const sanitizedApiKey = typeof apiKey === "string" ? apiKey.trim() : "";
 
   return (
     <div className="overflow-y-auto h-full pr-0 md:pr-2">
