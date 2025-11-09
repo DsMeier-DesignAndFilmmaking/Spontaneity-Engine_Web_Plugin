@@ -71,9 +71,27 @@ export async function POST(req: Request) {
       throw new Error("No AI suggestions generated");
     }
     return NextResponse.json({ suggestion: suggestions[0], tenantId });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    console.error(err);
-    return NextResponse.json({ error: "Failed to generate AI event", message }, { status: 500 });
+  } catch (error) {
+    const status =
+      typeof (error as { status?: number }).status === "number"
+        ? (error as { status?: number }).status
+        : typeof (error as { code?: number }).code === "number"
+        ? (error as { code?: number }).code
+        : 500;
+
+    const message =
+      (error as { error?: { message?: string } })?.error?.message ??
+      (error as { message?: string })?.message ??
+      "Failed to generate AI event";
+
+    console.error("[Spontaneous Generate] OpenAI request failed:", { status, error });
+
+    return new Response(
+      JSON.stringify({ error: "Failed to generate AI event", message }),
+      {
+        status: status === 0 ? 500 : status,
+        headers: { "Content-Type": "application/json" },
+      },
+    );
   }
 }

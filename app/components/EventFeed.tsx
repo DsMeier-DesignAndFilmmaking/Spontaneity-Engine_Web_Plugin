@@ -457,12 +457,13 @@ export default function EventFeed({
       }
       setAiError(null);
 
+      let contextHangouts: Event[] = [];
+
       try {
         const locationParam = userCoordinates
           ? `${userCoordinates.lat}, ${userCoordinates.lng}`
           : location;
 
-        let contextHangouts: Event[] = [];
         try {
           const contextParams = new URLSearchParams();
           contextParams.set("limit", "1");
@@ -499,16 +500,16 @@ export default function EventFeed({
                 }
               : undefined;
 
-          return {
-            title: event.title,
-            description: event.description,
-            category: event.tags?.[0] ?? "experience",
-            startTime: event.startTime,
-            location:
-              typeof eventLocation?.lat === "number" && typeof eventLocation?.lng === "number"
-                ? { lat: eventLocation.lat, lng: eventLocation.lng }
-                : undefined,
-          };
+        return {
+          title: event.title,
+          description: event.description,
+          category: event.tags?.[0] ?? "experience",
+          startTime: event.startTime,
+          location:
+            typeof eventLocation?.lat === "number" && typeof eventLocation?.lng === "number"
+              ? { lat: eventLocation.lat, lng: eventLocation.lng }
+              : undefined,
+        };
         });
 
         const requestBody: Record<string, unknown> = {
@@ -572,8 +573,44 @@ export default function EventFeed({
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : "Failed to load AI suggestions.";
         console.error("AI suggestion fetch failed", error);
-        setAiCards([]);
-        setAiError(message);
+
+        if (contextHangouts.length > 0) {
+          const fallback = contextHangouts[0];
+          const fallbackLocation =
+            fallback.location && typeof fallback.location === "object"
+              ? {
+                  lat: (fallback.location as { lat?: unknown }).lat,
+                  lng: (fallback.location as { lng?: unknown }).lng,
+                }
+              : undefined;
+
+          setAiCards([
+            {
+              id: fallback.id ?? `context-${Date.now()}`,
+              title: fallback.title ?? "Local Hang Out",
+              description: fallback.description ?? "Suggested by the community",
+              location:
+                typeof fallbackLocation?.lat === "number" && typeof fallbackLocation?.lng === "number"
+                  ? { lat: fallbackLocation.lat, lng: fallbackLocation.lng }
+                  : userCoordinates ?? { lat: 40.7128, lng: -74.006 },
+              createdAt: new Date(),
+              startTime: fallback.startTime,
+              tags: Array.isArray(fallback.tags)
+                ? fallback.tags.filter((tag): tag is string => typeof tag === "string")
+                : undefined,
+              source: "AI",
+            },
+          ]);
+
+          if (message.toLowerCase().includes("rate limit")) {
+            setAiError("OpenAI rate limit reached. Showing a top local hang out instead.");
+          } else {
+            setAiError(message);
+          }
+        } else {
+          setAiCards([]);
+          setAiError(message);
+        }
       } finally {
         setAiLoading(false);
       }
@@ -588,8 +625,8 @@ export default function EventFeed({
       userCoordinates,
       location,
       tags,
-      aiLoading,
       cacheDuration,
+      aiLoading,
     ]);
 
   // Notify parent when events change (after state update)
