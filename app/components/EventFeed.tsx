@@ -156,6 +156,7 @@ export default function EventFeed({
   const [useApiKey, setUseApiKey] = useState(!!defaultApiKey);
   const [tenantResolving, setTenantResolving] = useState(false);
   const resolvingTenantRef = useRef(false);
+  const openAiRateLimitedRef = useRef(false);
 
   const sanitizedApiKey = typeof apiKey === "string" ? apiKey.trim() : "";
 
@@ -421,6 +422,13 @@ export default function EventFeed({
         return;
       }
 
+      if (openAiRateLimitedRef.current) {
+        setAiCard(null);
+        setAiError("No AI Suggestions right now");
+        setIsAiLoading(false);
+        return;
+      }
+
       const hasTenantAuth = !!(tenantId && tenantId.trim().length > 0);
       const hasApiKeyAuth = useApiKey && sanitizedApiKey.length > 0;
 
@@ -525,6 +533,7 @@ export default function EventFeed({
         console.error("AI suggestion fetch failed", error);
         setAiCard(null);
         if (message.toLowerCase().includes("rate limit")) {
+          openAiRateLimitedRef.current = true;
           setAiError("No AI Suggestions right now");
         } else {
           setAiError(message);
