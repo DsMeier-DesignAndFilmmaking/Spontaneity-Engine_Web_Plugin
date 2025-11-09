@@ -6,36 +6,58 @@ import { extractTenantId, respondMissingTenantId } from "@/app/api/_utils/tenant
 
 export async function DELETE(req: Request) {
   try {
-    const url = new URL(req.url);
-    const eventId = url.searchParams.get("eventId");
-    const userId = url.searchParams.get("userId");
-    const apiKeyFromQuery = url.searchParams.get("apiKey");
-    const apiKeyFromHeader = req.headers.get("x-api-key");
-
-    const { tenantId: extractedTenantId, sources } = await extractTenantId(
+    const { tenantId: extractedTenantId, sources, parsedBody } = await extractTenantId(
       req,
       "/app/api/plugin/delete-event",
     );
 
-    const tenantId = getTenantId(apiKeyFromQuery || apiKeyFromHeader || undefined, extractedTenantId || undefined);
+    const { searchParams } = new URL(req.url);
+    const eventId = searchParams.get("eventId");
+    const userId = searchParams.get("userId");
+    const tenantIdQuery = searchParams.get("tenantId");
+    const apiKeyQuery = searchParams.get("apiKey");
 
-    if (!tenantId) {
-      const traceSources = { ...sources, apiKey: apiKeyFromQuery ?? apiKeyFromHeader ?? null };
-      return respondMissingTenantId("/app/api/plugin/delete-event", traceSources);
+    let bodyTenantId: string | null = null;
+    let bodyApiKey: string | null = null;
+    if (parsedBody && typeof parsedBody === "object") {
+      const bodyRecord = parsedBody as Record<string, unknown>;
+      if (typeof bodyRecord.tenantId === "string" && bodyRecord.tenantId.trim().length > 0) {
+        bodyTenantId = bodyRecord.tenantId.trim();
+      }
+      if (typeof bodyRecord.apiKey === "string" && bodyRecord.apiKey.trim().length > 0) {
+        bodyApiKey = bodyRecord.apiKey.trim();
+      }
     }
 
-    if (!eventId) {
+    const apiKeyCandidate =
+      apiKeyQuery ??
+      bodyApiKey ??
+      sources.bodyApiKey ??
+      sources.queryApiKey ??
+      sources.headerApiKey ??
+      null;
+
+    const tenantIdCandidate =
+      extractedTenantId ??
+      tenantIdQuery ??
+      bodyTenantId ??
+      sources.bodyTenantId ??
+      sources.queryTenantId ??
+      sources.headerTenantId ??
+      undefined;
+
+    const tenantId = getTenantId(apiKeyCandidate || undefined, tenantIdCandidate || undefined) ?? undefined;
+
+    if (!eventId || !userId) {
       return NextResponse.json(
-        { error: "Invalid eventId", message: "eventId query parameter is required" },
+        { error: "Invalid request", message: "eventId and userId are required" },
         { status: 400 },
       );
     }
 
-    if (!userId) {
-      return NextResponse.json(
-        { error: "Authentication required", message: "userId query parameter is required" },
-        { status: 401 },
-      );
+    if (!tenantId) {
+      const traceSources = { ...sources, apiKey: apiKeyCandidate, tenantIdCandidate: tenantIdCandidate ?? null };
+      return respondMissingTenantId("/app/api/plugin/delete-event", traceSources);
     }
 
     const rateLimitCheck = checkRateLimit(tenantId, "requests");
@@ -58,11 +80,10 @@ export async function DELETE(req: Request) {
     }
 
     await deleteEvent(eventId, tenantId);
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, tenantId });
   } catch (err) {
     console.error("=== DELETE EVENT ERROR ===", err);
     const message = err instanceof Error ? err.message : "Failed to delete event";
-    const status = message.toLowerCase().includes("permission") ? 403 : 500;
-    return NextResponse.json({ error: "Failed to delete event", message }, { status });
+    return NextResponse.json({ error: "Failed to delete event", message }, { status: 500 });
   }
 }

@@ -6,17 +6,18 @@ import { extractTenantId, respondMissingTenantId } from "@/app/api/_utils/tenant
 
 export async function PATCH(req: Request) {
   try {
-    const { tenantId: extractedTenantId, sources } = await extractTenantId(
+    const { tenantId: extractedTenantId, sources, parsedBody } = await extractTenantId(
       req,
       "/app/api/plugin/update-event",
     );
 
-    let payload: any;
-    if (sources.parsedBody && typeof sources.parsedBody === "object") {
-      payload = sources.parsedBody;
+    let data: Record<string, unknown>;
+    if (parsedBody && typeof parsedBody === "object") {
+      data = parsedBody as Record<string, unknown>;
     } else {
       try {
-        payload = await req.json();
+        const body = await req.json();
+        data = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
       } catch (parseError) {
         console.error("Failed to parse request body:", parseError);
         return NextResponse.json(
@@ -26,37 +27,58 @@ export async function PATCH(req: Request) {
       }
     }
 
-    const { eventId, updates, userId, apiKey, tenantId: tenantIdParam } = payload ?? {};
+    const body = data as Record<string, unknown> & {
+      eventId?: string;
+      updates?: Record<string, unknown>;
+      userId?: string;
+      apiKey?: string;
+      tenantId?: string;
+    };
 
-    if (!eventId || typeof eventId !== "string") {
+    const eventId = typeof body.eventId === "string" ? body.eventId : undefined;
+    const updates = (body.updates && typeof body.updates === "object" ? body.updates : undefined) as
+      | Record<string, unknown>
+      | undefined;
+    const userId = typeof body.userId === "string" ? body.userId : undefined;
+    const apiKey = typeof body.apiKey === "string" ? body.apiKey : undefined;
+    const tenantIdParam = typeof body.tenantId === "string" ? body.tenantId : undefined;
+
+    const apiKeyCandidate =
+      (typeof apiKey === "string" && apiKey.trim().length > 0 ? apiKey.trim() : null) ??
+      sources.bodyApiKey ??
+      sources.queryApiKey ??
+      sources.headerApiKey ??
+      null;
+
+    const tenantId =
+      extractedTenantId ??
+      getTenantId(apiKeyCandidate || undefined, tenantIdParam ?? undefined) ??
+      undefined;
+
+    if (!tenantId) {
+      const traceSources = { ...sources, apiKey: apiKeyCandidate };
+      return respondMissingTenantId("/app/api/plugin/update-event", traceSources);
+    }
+
+    if (!eventId) {
       return NextResponse.json(
-        { error: "Invalid eventId", message: "eventId must be provided" },
+        { error: "Invalid request", message: "eventId is required" },
         { status: 400 },
       );
     }
 
-    if (!userId || typeof userId !== "string") {
+    if (!userId) {
       return NextResponse.json(
-        { error: "Authentication required", message: "User ID is required" },
+        { error: "Authentication required", message: "userId is required" },
         { status: 401 },
       );
     }
 
     if (!updates || typeof updates !== "object") {
       return NextResponse.json(
-        { error: "Invalid updates", message: "Updates must be an object" },
+        { error: "Invalid updates", message: "updates payload is required" },
         { status: 400 },
       );
-    }
-
-    const apiKeyFromHeader = req.headers.get("x-api-key");
-    const apiKeyToUse = apiKey || apiKeyFromHeader;
-
-    const tenantId = getTenantId(apiKeyToUse || undefined, extractedTenantId || tenantIdParam || undefined);
-
-    if (!tenantId) {
-      const traceSources = { ...sources, apiKey: apiKeyToUse ?? null };
-      return respondMissingTenantId("/app/api/plugin/update-event", traceSources);
     }
 
     const rateLimitCheck = checkRateLimit(tenantId, "requests");
@@ -79,12 +101,12 @@ export async function PATCH(req: Request) {
     }
 
     await updateEvent(eventId, updates, tenantId);
-    return NextResponse.json({ success: true });
+
+    return NextResponse.json({ success: true, tenantId });
   } catch (err) {
     console.error("=== UPDATE EVENT ERROR ===", err);
     const message = err instanceof Error ? err.message : "Failed to update event";
-    const status = message.toLowerCase().includes("permission") ? 403 : 500;
-    return NextResponse.json({ error: "Failed to update event", message }, { status });
+    return NextResponse.json({ error: "Failed to update event", message }, { status: 500 });
   }
 }
 

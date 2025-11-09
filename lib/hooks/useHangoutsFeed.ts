@@ -63,7 +63,13 @@ export function useHangoutsFeed(filters: HangoutFeedFilters = {}): UseHangoutsFe
     }
 
     if (!tenantId) {
-      console.warn("⏳ TenantId missing. Subscribing to public hangOuts feed.");
+      console.info("⏳ Waiting for tenantId before subscribing to hangOuts feed.");
+      startTransition(() => {
+        setHangouts([]);
+        setLoading(false);
+        setError(null);
+      });
+      return;
     }
 
     console.log("📡 Subscribing to hangOuts...", {

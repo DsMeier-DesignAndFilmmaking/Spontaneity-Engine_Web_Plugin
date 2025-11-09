@@ -6,17 +6,18 @@ import { extractTenantId, respondMissingTenantId } from "@/app/api/_utils/tenant
 
 export async function POST(req: Request) {
   try {
-    const { tenantId: extractedTenantId, sources } = await extractTenantId(
+    const { tenantId: extractedTenantId, sources, parsedBody } = await extractTenantId(
       req,
       "/app/api/plugin/submit-event",
     );
 
-    let data: any;
-    if (sources.parsedBody && typeof sources.parsedBody === "object") {
-      data = sources.parsedBody;
+    let data: Record<string, unknown>;
+    if (parsedBody && typeof parsedBody === "object") {
+      data = parsedBody as Record<string, unknown>;
     } else {
       try {
-        data = await req.json();
+        const body = await req.json();
+        data = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
       } catch (parseError) {
         console.error("Failed to parse request body:", parseError);
         return NextResponse.json(
@@ -26,15 +27,31 @@ export async function POST(req: Request) {
       }
     }
 
-    const { userId, apiKey, tenantId: tenantIdParam, ...eventData } = data ?? {};
+    const {
+      userId,
+      apiKey,
+      tenantId: tenantIdParam,
+      ...eventData
+    } = data as Record<string, unknown> & {
+      userId?: string;
+      apiKey?: string;
+      tenantId?: string;
+    };
 
-    const apiKeyFromHeader = req.headers.get("x-api-key");
-    const apiKeyToUse = apiKey || apiKeyFromHeader;
+    const apiKeyCandidate =
+      (typeof apiKey === "string" && apiKey.trim().length > 0 ? apiKey.trim() : null) ??
+      sources.bodyApiKey ??
+      sources.queryApiKey ??
+      sources.headerApiKey ??
+      null;
 
-    const tenantId = getTenantId(apiKeyToUse || undefined, extractedTenantId || tenantIdParam || undefined);
+    const tenantId =
+      extractedTenantId ??
+      getTenantId(apiKeyCandidate || undefined, tenantIdParam ?? undefined) ??
+      undefined;
 
     if (!tenantId) {
-      const traceSources = { ...sources, apiKey: apiKeyToUse ?? null };
+      const traceSources = { ...sources, apiKey: apiKeyCandidate };  
       return respondMissingTenantId("/app/api/plugin/submit-event", traceSources);
     }
 
@@ -129,8 +146,8 @@ export async function POST(req: Request) {
 
     const result = await submitEvent(event, tenantId);
     const { id, ...rest } = result ?? {};
-    console.log("submitEvent succeeded:", { id });
-    return NextResponse.json({ success: true, id, ...rest });
+    console.log("submitEvent succeeded:", { id, tenantId });
+    return NextResponse.json({ success: true, id, ...rest, tenantId });
   } catch (err) {
     console.error("=== SUBMIT EVENT ERROR ===");
     console.error("Error type:", typeof err);

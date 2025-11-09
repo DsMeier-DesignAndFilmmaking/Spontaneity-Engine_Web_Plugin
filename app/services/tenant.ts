@@ -61,17 +61,41 @@ export function getTenantId(apiKey?: string | null, tenantId?: string | null): s
   return null;
 }
 
+export interface TenantExtractionSources {
+  bodyTenantId: string | null;
+  queryTenantId: string | null;
+  headerTenantId: string | null;
+  cookieTenantId: string | null;
+  bodyApiKey: string | null;
+  queryApiKey: string | null;
+  headerApiKey: string | null;
+  resolvedTenantId: string | null;
+  apiKey?: string | null;
+  tenantIdCandidate?: string | null;
+}
+
 export interface TenantExtractionResult {
   tenantId?: string;
-  bodyTenantId?: string | null;
-  queryTenantId?: string | null;
-  headerTenantId?: string | null;
   parsedBody?: unknown;
+  sources: TenantExtractionSources;
+}
+
+function parseCookieValue(cookieHeader: string | null, key: string): string | null {
+  if (!cookieHeader) return null;
+  const cookies = cookieHeader.split(";");
+  for (const cookie of cookies) {
+    const [k, ...rest] = cookie.trim().split("=");
+    if (k === key) {
+      return rest.join("=").trim() || null;
+    }
+  }
+  return null;
 }
 
 export async function extractTenantIdFromRequest(req: Request): Promise<TenantExtractionResult> {
-  let bodyTenantId: string | null | undefined;
   let parsedBody: unknown;
+  let bodyTenantId: string | null = null;
+  let bodyApiKey: string | null = null;
 
   try {
     const cloned = req.clone();
@@ -80,7 +104,13 @@ export async function extractTenantIdFromRequest(req: Request): Promise<TenantEx
       try {
         parsedBody = JSON.parse(text);
         if (parsedBody && typeof parsedBody === "object") {
-          bodyTenantId = (parsedBody as Record<string, unknown>).tenantId as string | null | undefined;
+          const record = parsedBody as Record<string, unknown>;
+          if (typeof record.tenantId === "string" && record.tenantId.trim().length > 0) {
+            bodyTenantId = record.tenantId.trim();
+          }
+          if (typeof record.apiKey === "string" && record.apiKey.trim().length > 0) {
+            bodyApiKey = record.apiKey.trim();
+          }
         }
       } catch (parseError) {
         console.warn("⚠️ Failed to parse request body while extracting tenantId:", parseError);
@@ -91,15 +121,36 @@ export async function extractTenantIdFromRequest(req: Request): Promise<TenantEx
   }
 
   let queryTenantId: string | null = null;
+  let queryApiKey: string | null = null;
   try {
     const url = new URL(req.url);
     queryTenantId = url.searchParams.get("tenantId");
+    queryApiKey = url.searchParams.get("apiKey");
   } catch (urlError) {
     console.warn("⚠️ Failed to parse request URL while extracting tenantId:", urlError);
   }
 
   const headerTenantId = req.headers.get("x-tenant-id");
-  const resolvedTenantId = bodyTenantId || queryTenantId || headerTenantId || undefined;
+  const headerApiKey = req.headers.get("x-api-key") || req.headers.get("authorization");
+  const cookieHeader = req.headers.get("cookie");
+  const cookieTenantId = parseCookieValue(cookieHeader, "tenantId");
+  const cookieApiKey = parseCookieValue(cookieHeader, "apiKey");
+
+  const directTenant =
+    bodyTenantId?.trim() ||
+    queryTenantId?.trim() ||
+    headerTenantId?.trim() ||
+    cookieTenantId?.trim() ||
+    undefined;
+
+  const apiKeyCandidate =
+    bodyApiKey?.trim() ||
+    queryApiKey?.trim() ||
+    headerApiKey?.trim() ||
+    cookieApiKey?.trim() ||
+    undefined;
+
+  const resolvedTenantId = getTenantId(apiKeyCandidate || undefined, directTenant || undefined) || undefined;
 
   let path = "unknown";
   try {
@@ -110,18 +161,34 @@ export async function extractTenantIdFromRequest(req: Request): Promise<TenantEx
 
   console.log("[TRACE tenantId]", {
     path,
+    directTenant: directTenant ?? null,
+    apiKeyCandidate: apiKeyCandidate ?? null,
+    resolvedTenantId: resolvedTenantId ?? null,
     bodyTenantId,
     queryTenantId,
     headerTenantId,
-    resolvedTenantId,
+    cookieTenantId,
+    bodyApiKey,
+    queryApiKey,
+    headerApiKey,
+    cookieApiKey,
   });
+
+  const sources: TenantExtractionSources = {
+    bodyTenantId: bodyTenantId ?? null,
+    queryTenantId: queryTenantId ?? null,
+    headerTenantId: headerTenantId ?? null,
+    cookieTenantId: cookieTenantId ?? null,
+    bodyApiKey: bodyApiKey ?? null,
+    queryApiKey: queryApiKey ?? null,
+    headerApiKey: headerApiKey ?? null,
+    resolvedTenantId: resolvedTenantId ?? null,
+  };
 
   return {
     tenantId: resolvedTenantId,
-    bodyTenantId,
-    queryTenantId,
-    headerTenantId,
     parsedBody,
+    sources,
   };
 }
 
@@ -154,7 +221,14 @@ export function getTenantConfig(tenantId: string | null): {
   primaryColor?: string;
   aiPromptTemplate?: string;
 } {
-  const configs: Record<string, any> = {
+  const configs: Record<
+    string,
+    {
+      mapboxStyle?: string;
+      primaryColor?: string;
+      aiPromptTemplate?: string;
+    }
+  > = {
     "tenant-1": {
       primaryColor: "#3b82f6", // Blue
       aiPromptTemplate: "Generate a family-friendly event...",

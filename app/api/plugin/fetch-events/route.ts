@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { fetchUserEvents } from "@/app/services/events";
 import { generateLocalAISuggestions, type WeatherContext } from "@/app/services/ai";
-import { getTenantId } from "@/app/services/tenant";
 import { checkRateLimit } from "@/app/services/rate-limit";
 import { fetchSpontaneousData, type SpontaneousCard } from "@/lib/fetchSpontaneousData";
 import { extractTenantId, respondMissingTenantId } from "@/app/api/_utils/tenant";
@@ -226,20 +225,24 @@ export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
 
-    const apiKey = searchParams.get("apiKey") || req.headers.get("x-api-key");
-    const tenantParam = searchParams.get("tenantId");
-    const { tenantId: extractedTenantId, sources } = await extractTenantId(
+    const { tenantId, sources, parsedBody } = await extractTenantId(
       req,
       "/app/api/plugin/fetch-events",
     );
-    const tenantId = getTenantId(apiKey || undefined, extractedTenantId || tenantParam || undefined);
 
-    if (!tenantId) {
-      const traceSources = { ...sources, apiKey: apiKey ?? null, queryTenantId: tenantParam ?? sources.queryTenantId };
-      return respondMissingTenantId("/app/api/plugin/fetch-events", traceSources);
+    const resolvedTenantId = tenantId;
+    const apiKey =
+      sources.queryApiKey ??
+      sources.headerApiKey ??
+      sources.bodyApiKey ??
+      searchParams.get("apiKey") ??
+      req.headers.get("x-api-key");
+
+    if (!resolvedTenantId) {
+      return respondMissingTenantId("/app/api/plugin/fetch-events", sources);
     }
 
-    const rateLimitCheck = checkRateLimit(tenantId, "requests");
+    const rateLimitCheck = checkRateLimit(resolvedTenantId, "requests");
     if (!rateLimitCheck.allowed) {
       return NextResponse.json(
         {

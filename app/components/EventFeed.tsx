@@ -10,7 +10,7 @@ import { Event, EventFormData } from "@/lib/types";
 import type { SpontaneousCard } from "@/lib/fetchSpontaneousData";
 import { getCurrentLocation } from "@/lib/hooks/useGeolocation";
 import { useHangoutsFeed } from "@/lib/hooks/useHangoutsFeed";
-import { getWalkingRoute, type DirectionsStep, type NavigationRoutePayload } from "@/lib/mapbox";
+import { getWalkingRoute, type NavigationRoutePayload } from "@/lib/mapbox";
 
 interface ApiResponse {
   events: Event[];
@@ -151,20 +151,20 @@ export default function EventFeed({
   const [aiEvents, setAiEvents] = useState<Event[]>([]);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
-  const aiStreamControllerRef = useRef<AbortController | null>(null);
-  const aiRequestIdRef = useRef(0);
-  
-  // Multi-tenant testing controls
-  const [apiKey, setApiKey] = useState(defaultApiKey || "");
   const [tenantId, setTenantId] = useState(defaultTenantId || "");
   const [useApiKey, setUseApiKey] = useState(!!defaultApiKey);
+  const [tenantResolving, setTenantResolving] = useState(false);
 
   const [navigationLoading, setNavigationLoading] = useState(false);
   const { hangouts, loading: hangoutsLoading, error: hangoutsError } = useHangoutsFeed({
-    tenantId: useApiKey ? undefined : tenantId || undefined,
+    tenantId: tenantId || undefined,
     tags: tags.length > 0 ? tags : undefined,
     limit,
   });
+
+  const aiStreamControllerRef = useRef<AbortController | null>(null);
+  const aiRequestIdRef = useRef(0);
+  const resolvingTenantRef = useRef(false);
 
   const combinedEvents = useMemo(() => {
     const baseEvents = includeAI && showAIEvents ? [...aiEvents, ...hangouts] : [...hangouts];
@@ -248,7 +248,7 @@ export default function EventFeed({
     return sorted.slice(0, 5);
   }, [aiEvents, hangouts, includeAI, showAIEvents, enableSorting, sortBy, userCoordinates]);
 
-  const loading = authLoading || hangoutsLoading || aiLoading || locationLoading;
+  const loading = authLoading || hangoutsLoading || aiLoading || locationLoading || tenantResolving;
   const combinedErrorMessage = hangoutsError?.message || aiError || null;
 
   // Get user's current location on mount
@@ -400,7 +400,7 @@ export default function EventFeed({
         }
       );
     },
-    [showNotification]
+    [showNotification, onNavigationRouteChange]
   );
 
   // Build API query string
@@ -426,25 +426,26 @@ export default function EventFeed({
     if (location) {
       params.set("city", location);
     }
+    params.set("cacheDuration", cacheDuration.toString());
+    if (tenantId) {
+      params.set("tenantId", tenantId);
+    }
     // Add tenant authentication
     if (useApiKey && apiKey) {
       params.set("apiKey", apiKey);
-    } else if (tenantId) {
-      params.set("tenantId", tenantId);
     }
-    params.set("cacheDuration", cacheDuration.toString());
     return params.toString();
   }, [
     limit,
     userCoordinates,
     location,
+    tenantId,
     includeAI,
     enableSorting,
     sortBy,
     tags,
     useApiKey,
     apiKey,
-    tenantId,
     cacheDuration,
   ]);
 
@@ -455,6 +456,18 @@ export default function EventFeed({
         setAiEvents([]);
         setAiError(null);
         setAiLoading(false);
+        return;
+      }
+
+      if (useApiKey && apiKey && (!tenantId || tenantResolving)) {
+        console.log("⏳ Waiting for tenantId before streaming AI events", {
+          hasTenantId: !!tenantId,
+          apiKey,
+          tenantResolving,
+        });
+        aiStreamControllerRef.current?.abort();
+        setAiLoading(false);
+        setAiError(null);
         return;
       }
 
@@ -729,6 +742,9 @@ export default function EventFeed({
       location,
       tenantId,
       aiLoading,
+      useApiKey,
+      apiKey,
+      tenantResolving,
     ],
   );
 
@@ -748,6 +764,73 @@ export default function EventFeed({
   useEffect(() => {
     fetchAiEvents(true);
   }, [fetchAiEvents]);
+
+  useEffect(() => {
+    if (!useApiKey || !apiKey) {
+      resolvingTenantRef.current = false;
+      setTenantResolving(false);
+      return;
+    }
+
+    if (tenantId && tenantId.trim().length > 0) {
+      resolvingTenantRef.current = false;
+      setTenantResolving(false);
+      return;
+    }
+
+    if (resolvingTenantRef.current) {
+      return;
+    }
+
+    resolvingTenantRef.current = true;
+    setTenantResolving(true);
+
+    const controller = new AbortController();
+
+    (async () => {
+      try {
+        const url = `/api/plugin/resolve-tenant?apiKey=${encodeURIComponent(apiKey)}`;
+        const response = await fetch(url, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": apiKey,
+          },
+          signal: controller.signal,
+          cache: "no-store",
+        });
+
+        const result = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          console.warn("Failed to resolve tenantId from API key", { status: response.status, result });
+          return;
+        }
+
+        if (typeof result?.tenantId === "string" && result.tenantId.trim().length > 0) {
+          console.log("[tenantId] resolved via /api/plugin/resolve-tenant", {
+            tenantId: result.tenantId,
+            sources: result.sources,
+          });
+          setTenantId(result.tenantId.trim());
+        } else {
+          console.warn("Resolve-tenant endpoint returned without tenantId", result);
+        }
+      } catch (error) {
+        if (controller.signal.aborted) {
+          return;
+        }
+        console.error("Tenant resolution failed", error);
+      } finally {
+        resolvingTenantRef.current = false;
+        setTenantResolving(false);
+      }
+    })();
+
+    return () => {
+      controller.abort();
+    };
+  }, [useApiKey, apiKey, tenantId]);
 
   const handleSubmit = async (formData: EventFormData) => {
     if (!user) {
