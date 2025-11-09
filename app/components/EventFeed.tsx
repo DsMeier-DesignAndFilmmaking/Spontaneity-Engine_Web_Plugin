@@ -7,7 +7,6 @@ import EventForm from "./EventForm";
 import Loader from "./Loader";
 import { useAuth } from "./AuthContext";
 import { Event, EventFormData } from "@/lib/types";
-import type { SpontaneousCard } from "@/lib/fetchSpontaneousData";
 import { getCurrentLocation } from "@/lib/hooks/useGeolocation";
 import { useHangoutsFeed } from "@/lib/hooks/useHangoutsFeed";
 import { getWalkingRoute, type NavigationRoutePayload } from "@/lib/mapbox";
@@ -71,11 +70,10 @@ interface EventFeedProps {
   aiBackgroundColor?: string; // Background color for AI event cards
   onNavigationRouteChange?: (payload: NavigationRoutePayload | null) => void;
   onMoreInfo?: (event: Event) => void;
-  ignoredAiEventIds?: string[];
 }
 
 const EARTH_RADIUS_METERS = 6_371_000;
-const AI_EVENT_LIMIT = 5;
+const AI_EVENT_LIMIT = 1;
 
 const haversineDistanceMeters = (
   a: { lat: number; lng: number },
@@ -129,7 +127,6 @@ export default function EventFeed({
   aiBackgroundColor = "#f5f3ff",
   onNavigationRouteChange = () => undefined,
   onMoreInfo,
-  ignoredAiEventIds = [],
 }: EventFeedProps) {
   const { user, loading: authLoading } = useAuth();
   const [showForm, setShowForm] = useState(false);
@@ -155,7 +152,7 @@ export default function EventFeed({
   const [apiKey, setApiKey] = useState(defaultApiKey || "");
   const [useApiKey, setUseApiKey] = useState(!!defaultApiKey);
   const [tenantResolving, setTenantResolving] = useState(false);
-  const streamingUnsupportedRef = useRef(false);
+  const resolvingTenantRef = useRef(false);
 
   const sanitizedApiKey = typeof apiKey === "string" ? apiKey.trim() : "";
 
@@ -165,10 +162,6 @@ export default function EventFeed({
     tags: tags.length > 0 ? tags : undefined,
     limit,
   });
-
-  const aiStreamControllerRef = useRef<AbortController | null>(null);
-  const aiRequestIdRef = useRef(0);
-  const resolvingTenantRef = useRef(false);
 
   const combinedEvents = useMemo(() => {
     const baseEvents = includeAI && showAIEvents ? [...aiEvents, ...hangouts] : [...hangouts];
@@ -306,10 +299,10 @@ export default function EventFeed({
     setApiKey(defaultApiKey || "");
   }, [defaultApiKey]);
 
-  const showNotification = (type: "success" | "error", message: string) => {
+  const showNotification = useCallback((type: "success" | "error", message: string) => {
     setNotification({ type, message });
     setTimeout(() => setNotification(null), 5000);
-  };
+  }, []);
 
   const handleNavigate = useCallback(
     (target: Event) => {
@@ -412,392 +405,100 @@ export default function EventFeed({
   );
 
   // Build API query string
-  const buildQueryString = useCallback(() => {
-    const params = new URLSearchParams();
-    params.set("limit", limit.toString());
-    // Use user coordinates if available, otherwise use location string
-    const locationParam = userCoordinates 
-      ? `${userCoordinates.lat}, ${userCoordinates.lng}` 
-      : location;
-    params.set("location", locationParam);
-    params.set("includeAI", includeAI.toString());
-    if (enableSorting && sortBy) {
-      params.set("sortBy", sortBy);
-    }
-    if (tags.length > 0) {
-      params.set("tags", tags.join(","));
-    }
-    if (userCoordinates) {
-      params.set("userLat", userCoordinates.lat.toString());
-      params.set("userLng", userCoordinates.lng.toString());
-    }
-    if (location) {
-      params.set("city", location);
-    }
-    params.set("cacheDuration", cacheDuration.toString());
-    if (tenantId) {
-      params.set("tenantId", tenantId);
-    }
-    // Add tenant authentication
-    if (useApiKey && sanitizedApiKey.length > 0) {
-      params.set("apiKey", sanitizedApiKey);
-    }
-    return params.toString();
-  }, [
-    limit,
-    userCoordinates,
-    location,
-    tenantId,
-    includeAI,
-    enableSorting,
-    sortBy,
-    tags,
-    useApiKey,
-    sanitizedApiKey,
-    cacheDuration,
-  ]);
-
   const fetchAiEvents = useCallback(
     async (showLoading: boolean = false) => {
       if (!showAIEvents || !includeAI) {
-        aiStreamControllerRef.current?.abort();
         setAiEvents([]);
         setAiError(null);
         setAiLoading(false);
         return;
       }
 
-      if (useApiKey && sanitizedApiKey.length > 0 && (!tenantId || tenantResolving)) {
-        console.log("⏳ Waiting for tenantId before streaming AI events", {
-          hasTenantId: !!tenantId,
-          apiKey: sanitizedApiKey,
-          tenantResolving,
-        });
-        aiStreamControllerRef.current?.abort();
-        setAiLoading(false);
-        setAiError(null);
-        return;
-      }
+      const hasTenantAuth = !!(tenantId && tenantId.trim().length > 0);
+      const hasApiKeyAuth = useApiKey && sanitizedApiKey.length > 0;
 
-      const coordinates =
-        userCoordinates ??
-        (() => {
-          const match = location.match(/^(-?\d+\.?\d*),\s*(-?\d+\.?\d*)$/);
-          if (!match) {
-            return null;
-          }
-          const lat = parseFloat(match[1]);
-          const lng = parseFloat(match[2]);
-          return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
-        })();
-
-      if (!coordinates) {
+      if (!hasTenantAuth && !hasApiKeyAuth) {
         setAiEvents([]);
-        setAiError("Unable to determine location for AI suggestions.");
+        setAiError("Missing tenant or API credentials for AI suggestions.");
         setAiLoading(false);
         return;
       }
-
-      const controller = new AbortController();
-      aiStreamControllerRef.current?.abort();
-      aiStreamControllerRef.current = controller;
-
-      const requestId = ++aiRequestIdRef.current;
 
       if (showLoading || !aiLoading) {
         setAiLoading(true);
       }
       setAiError(null);
-      setAiEvents([]);
 
-      const aggregatedPromptCards = hangouts.slice(0, 5).map((event) => ({
-        title: event.title,
-        description: event.description,
-        category: event.tags?.[0] ?? "experience",
-        startTime: event.startTime,
-        location: event.location,
-      }));
+      try {
+        const params = new URLSearchParams();
+        params.set("limit", "1");
+        params.set("includeAI", "true");
+        params.set("cacheDuration", cacheDuration.toString());
 
-      const trimmedPreferences = tags.map((tag) => tag.trim()).filter(Boolean);
+        const locationParam = userCoordinates
+          ? `${userCoordinates.lat}, ${userCoordinates.lng}`
+          : location;
+        params.set("location", locationParam);
 
-      let streamedCount = 0;
-
-      const pushEvent = (card: SpontaneousCard) => {
-        streamedCount += 1;
-        const event: Event = {
-          id: card.id ?? `AI-${tenantId ?? "default"}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-          title: card.title ?? "AI Suggestion",
-          description: card.description ?? "",
-          tags: card.category ? [card.category] : [],
-          location: {
-            lat: card.location?.lat ?? coordinates.lat,
-            lng: card.location?.lng ?? coordinates.lng,
-          },
-          createdBy: "ai",
-          createdAt: new Date(),
-          source: "AI",
-          tenantId: tenantId || undefined,
-          startTime: card.startTime,
-        };
-
-        setAiEvents((prev) => {
-          const exists = prev.some(
-            (existing) =>
-              (existing.id && existing.id === event.id) ||
-              existing.title.toLowerCase() === event.title.toLowerCase(),
-          );
-          if (exists) {
-            return prev;
-          }
-          const next = [...prev, event];
-          return next.slice(0, AI_EVENT_LIMIT);
-        });
-      };
-
-      const state = {
-        started: false,
-        buffer: "",
-        depth: 0,
-        inString: false,
-        escape: false,
-        objectStart: -1,
-      };
-
-      const handleChunk = (chunk: string) => {
-        state.buffer += chunk;
-
-        if (!state.started) {
-          const idx = state.buffer.indexOf("[");
-          if (idx === -1) {
-            state.buffer = state.buffer.slice(-1);
-            return;
-          }
-          state.started = true;
-          state.buffer = state.buffer.slice(idx + 1);
+        if (userCoordinates) {
+          params.set("userLat", userCoordinates.lat.toString());
+          params.set("userLng", userCoordinates.lng.toString());
+        }
+        if (tags.length > 0) {
+          params.set("tags", tags.join(","));
+        }
+        if (tenantId && tenantId.trim().length > 0) {
+          params.set("tenantId", tenantId.trim());
+        } else if (hasApiKeyAuth) {
+          params.set("apiKey", sanitizedApiKey);
         }
 
-        for (let i = 0; i < state.buffer.length; i += 1) {
-          const char = state.buffer[i];
-
-          if (state.escape) {
-            state.escape = false;
-            continue;
-          }
-
-          if (char === "\\" && state.inString) {
-            state.escape = true;
-            continue;
-          }
-
-          if (char === '"') {
-            state.inString = !state.inString;
-            continue;
-          }
-
-          if (state.inString) {
-            continue;
-          }
-
-          if (char === "{") {
-            if (state.depth === 0) {
-              state.objectStart = i;
-            }
-            state.depth += 1;
-            continue;
-          }
-
-          if (char === "}") {
-            state.depth -= 1;
-            if (state.depth === 0 && state.objectStart !== -1) {
-              const objectString = state.buffer.slice(state.objectStart, i + 1);
-              try {
-                const parsed = JSON.parse(objectString) as SpontaneousCard;
-                if (requestId === aiRequestIdRef.current) {
-                  pushEvent(parsed);
-                }
-              } catch (parseError) {
-                console.warn("Failed to parse streamed suggestion object:", parseError);
-              }
-
-              state.buffer = state.buffer.slice(i + 1).replace(/^[\s,]*/, "");
-              state.objectStart = -1;
-              i = -1;
-            }
-            continue;
-          }
-
-          if (char === "]" && state.depth === 0) {
-            state.started = false;
-            state.buffer = "";
-            state.objectStart = -1;
-            state.inString = false;
-            state.escape = false;
-            break;
-          }
-        }
-      };
-
-      const finalizeRequest = () => {
-        if (requestId === aiRequestIdRef.current) {
-          setAiLoading(false);
-          aiStreamControllerRef.current = null;
-        }
-      };
-
-      const fetchLegacyAiEvents = async () => {
-        const queryString = buildQueryString();
-        console.log("📡 Fetching AI hangOuts (legacy)...", { queryString });
-        const response = await fetch(`${apiBaseUrl}${fetchEventsEndpoint}?${queryString}`, {
-          signal: controller.signal,
+        const response = await fetch(`${apiBaseUrl}${fetchEventsEndpoint}?${params.toString()}`, {
+          headers: hasApiKeyAuth ? { "x-api-key": sanitizedApiKey } : undefined,
         });
 
         if (!response.ok) {
-          throw new Error(`Failed to fetch AI events: ${response.statusText}`);
+          throw new Error(`AI suggestion request failed (${response.status})`);
         }
 
-        const data: ApiResponse = await response.json();
-        const eventsArray = Array.isArray(data) ? data : data.events || [];
+        const payload: ApiResponse | Event[] = await response.json();
+        const eventsArray = Array.isArray(payload) ? payload : payload.events || [];
 
-        const aiOnly = eventsArray.filter(
-          (event) =>
-            event.source === "AI" ||
-            event.createdBy === "ai" ||
-            (typeof event.id === "string" && event.id.startsWith("AI-")),
-        );
-
-        const idsToIgnore = new Set(ignoredAiEventIds);
-        const filteredAi = aiOnly.filter((event) => !idsToIgnore.has(event.id ?? "")).slice(0, AI_EVENT_LIMIT);
-
-        if (filteredAi.length === 0) {
-          console.log("⚠️ No AI events returned from API. Showing user-generated hangOuts only.");
-          setAiError("No AI suggestions available. Try refreshing in a moment.");
-        } else {
-          console.log("✅ AI events fetched:", filteredAi);
-          setAiError(null);
-        }
-
-        setAiEvents(filteredAi);
-      };
-
-      if (streamingUnsupportedRef.current) {
-        try {
-          await fetchLegacyAiEvents();
-          finalizeRequest();
-        } catch (legacyError) {
-          if (
-            controller.signal.aborted ||
-            legacyError instanceof DOMException ||
-            (legacyError instanceof Error && legacyError.name === "AbortError")
-          ) {
-            return;
-          }
-          const message =
-            legacyError instanceof Error ? legacyError.message : "Failed to fetch AI events.";
-          console.error("❌ AI events fetch error:", legacyError);
-          setAiEvents([]);
-          setAiError(message);
-        }
-        return;
-      }
-
-      try {
-        const response = await fetch("/api/spontaneous/generate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            location: coordinates,
-            preferences: trimmedPreferences,
-            aggregatedCards: aggregatedPromptCards,
-          }),
-          signal: controller.signal,
+        const aiOnly = eventsArray.filter((event) => {
+          const source = (event.source ?? "").toLowerCase();
+          return source === "ai" || event.createdBy === "ai" || (typeof event.id === "string" && event.id.startsWith("AI-"));
         });
 
-        if (!response.ok || !response.body) {
-          throw new Error(`Generation failed (${response.status})`);
-        }
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) {
-            break;
-          }
-          if (!value) continue;
-          const chunk = decoder.decode(value, { stream: true });
-          handleChunk(chunk);
-        }
-
-        if (requestId === aiRequestIdRef.current) {
-          if (streamedCount === 0) {
-            setAiEvents([]);
-            setAiError("No AI suggestions available. Try refreshing in a moment.");
-          } else {
-            setAiError(null);
-          }
-        }
-
-        finalizeRequest();
-      } catch (error: unknown) {
-        if (controller.signal.aborted || requestId !== aiRequestIdRef.current) {
+        if (aiOnly.length === 0) {
+          setAiEvents([]);
+          setAiError("AI suggestions are not available right now. Try again soon.");
           return;
         }
 
-        console.warn("Streaming AI suggestions failed, falling back to legacy API.", error);
-
-        const isAbortError =
-          error instanceof DOMException ||
-          (error instanceof Error && error.name === "AbortError") ||
-          error === "AbortError";
-        const isNetworkError =
-          error instanceof TypeError ||
-          (error instanceof Error &&
-            (error.message?.includes("ERR_CONNECTION_CLOSED") || error.message?.includes("Failed to fetch")));
-
-        if (!isAbortError && isNetworkError) {
-          streamingUnsupportedRef.current = true;
-        }
-
-        try {
-          await fetchLegacyAiEvents();
-        } catch (legacyError) {
-          if (
-            controller.signal.aborted ||
-            legacyError instanceof DOMException ||
-            (legacyError instanceof Error && legacyError.name === "AbortError")
-          ) {
-            return;
-          }
-          const message =
-            legacyError instanceof Error ? legacyError.message : "Failed to fetch AI events.";
-          console.error("❌ AI events fetch error:", legacyError);
-          setAiEvents([]);
-          setAiError(message);
-        } finally {
-          finalizeRequest();
-        }
+        setAiEvents(aiOnly.slice(0, AI_EVENT_LIMIT));
+        setAiError(null);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : "Failed to load AI suggestions.";
+        console.error("AI suggestion fetch failed", error);
+        setAiEvents([]);
+        setAiError(message);
+      } finally {
+        setAiLoading(false);
       }
-    },
-    [
+    }, [
       apiBaseUrl,
       fetchEventsEndpoint,
       includeAI,
       showAIEvents,
-      buildQueryString,
-      ignoredAiEventIds,
-      hangouts,
-      tags,
-      userCoordinates,
-      location,
       tenantId,
-      aiLoading,
       useApiKey,
       sanitizedApiKey,
-      tenantResolving,
-      streamingUnsupportedRef,
-    ],
-  );
+      userCoordinates,
+      location,
+      tags,
+      cacheDuration,
+      aiLoading,
+    ]);
 
   // Notify parent when events change (after state update)
   useEffect(() => {
@@ -805,12 +506,6 @@ export default function EventFeed({
       onEventsChange(combinedEvents);
     }
   }, [combinedEvents, onEventsChange]);
-
-  useEffect(() => {
-    return () => {
-      aiStreamControllerRef.current?.abort();
-    };
-  }, []);
 
   useEffect(() => {
     fetchAiEvents(true);
