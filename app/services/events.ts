@@ -105,7 +105,7 @@ const resolveTimestamp = (value: unknown): Date => {
   return new Date();
 };
 
-interface SubmitEventPayload {
+export interface SubmitEventPayload {
   title: string;
   description: string;
   tags: string[];
