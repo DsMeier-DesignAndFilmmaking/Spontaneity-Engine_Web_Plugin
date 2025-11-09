@@ -35,6 +35,8 @@ type RequestOptions = {
   includeAuth?: boolean;
 };
 
+type NextRequestInit = Omit<RequestInit, "signal"> & { signal?: AbortSignal };
+
 function buildRequest(
   method: string,
   body?: unknown,
@@ -56,7 +58,14 @@ function buildRequest(
   } else if (body !== undefined) {
     init.body = JSON.stringify(body);
   }
-  return new NextRequest(`http://localhost${pathname}`, init);
+
+  const { signal, ...rest } = init as RequestInit & { signal?: AbortSignal | null };
+  const nextInit: NextRequestInit = { ...rest };
+  if (signal ?? undefined) {
+    nextInit.signal = signal as AbortSignal;
+  }
+
+  return new NextRequest(`http://localhost${pathname}`, nextInit);
 }
 
 before(async () => {
