@@ -726,6 +726,13 @@ export default function EventFeed({
         try {
           await fetchLegacyAiEvents();
         } catch (legacyError) {
+          if (
+            controller.signal.aborted ||
+            legacyError instanceof DOMException ||
+            (legacyError instanceof Error && legacyError.name === "AbortError")
+          ) {
+            return;
+          }
           const message =
             legacyError instanceof Error ? legacyError.message : "Failed to fetch AI events.";
           console.error("❌ AI events fetch error:", legacyError);
