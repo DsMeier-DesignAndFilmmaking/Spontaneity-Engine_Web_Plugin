@@ -155,6 +155,7 @@ export default function EventFeed({
   const [apiKey, setApiKey] = useState(defaultApiKey || "");
   const [useApiKey, setUseApiKey] = useState(!!defaultApiKey);
   const [tenantResolving, setTenantResolving] = useState(false);
+  const streamingUnsupportedRef = useRef(false);
 
   const sanitizedApiKey = typeof apiKey === "string" ? apiKey.trim() : "";
 
@@ -678,6 +679,27 @@ export default function EventFeed({
         setAiEvents(filteredAi);
       };
 
+      if (streamingUnsupportedRef.current) {
+        try {
+          await fetchLegacyAiEvents();
+          finalizeRequest();
+        } catch (legacyError) {
+          if (
+            controller.signal.aborted ||
+            legacyError instanceof DOMException ||
+            (legacyError instanceof Error && legacyError.name === "AbortError")
+          ) {
+            return;
+          }
+          const message =
+            legacyError instanceof Error ? legacyError.message : "Failed to fetch AI events.";
+          console.error("❌ AI events fetch error:", legacyError);
+          setAiEvents([]);
+          setAiError(message);
+        }
+        return;
+      }
+
       try {
         const response = await fetch("/api/spontaneous/generate", {
           method: "POST",
@@ -723,6 +745,20 @@ export default function EventFeed({
         }
 
         console.warn("Streaming AI suggestions failed, falling back to legacy API.", error);
+
+        const isAbortError =
+          error instanceof DOMException ||
+          (error instanceof Error && error.name === "AbortError") ||
+          error === "AbortError";
+        const isNetworkError =
+          error instanceof TypeError ||
+          (error instanceof Error &&
+            (error.message?.includes("ERR_CONNECTION_CLOSED") || error.message?.includes("Failed to fetch")));
+
+        if (!isAbortError && isNetworkError) {
+          streamingUnsupportedRef.current = true;
+        }
+
         try {
           await fetchLegacyAiEvents();
         } catch (legacyError) {
@@ -759,6 +795,7 @@ export default function EventFeed({
       useApiKey,
       sanitizedApiKey,
       tenantResolving,
+      streamingUnsupportedRef,
     ],
   );
 
