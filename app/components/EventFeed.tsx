@@ -12,17 +12,7 @@ import { useHangoutsFeed } from "@/lib/hooks/useHangoutsFeed";
 import { getWalkingRoute, type NavigationRoutePayload } from "@/lib/mapbox";
 import { fetchAPI } from "@/lib/api/fetchAPI";
 
-interface ApiResponse {
-  events: Event[];
-  meta: {
-    total: number;
-    limit: number;
-    includeAI: boolean;
-    location: string;
-    tags: string[];
-    sortBy: string;
-  };
-}
+type Hangout = Event;
 
 interface AISuggestion {
   id: string;
@@ -74,7 +64,6 @@ interface EventFeedProps {
   pollingInterval?: number; // seconds
   // API endpoint overrides for embedding flexibility
   apiBaseUrl?: string; // Override base URL for API endpoints (default: "")
-  fetchEventsEndpoint?: string; // Custom fetch events endpoint (default: "/api/plugin/fetch-events")
   submitEventEndpoint?: string; // Custom submit event endpoint (default: "/api/plugin/submit-event")
   updateEventEndpoint?: string; // Custom update event endpoint (default: "/api/plugin/update-event")
   deleteEventEndpoint?: string; // Custom delete event endpoint (default: "/api/plugin/delete-event")
@@ -131,7 +120,6 @@ export default function EventFeed({
   eventLabel = "Hang Out",
   cacheDuration = 5,
   apiBaseUrl = "",
-  fetchEventsEndpoint = "/api/plugin/fetch-events",
   submitEventEndpoint = "/api/plugin/submit-event",
   updateEventEndpoint = "/api/plugin/update-event",
   deleteEventEndpoint = "/api/plugin/delete-event",
@@ -159,8 +147,9 @@ export default function EventFeed({
   const [tagInput, setTagInput] = useState("");
   const [limit, setLimit] = useState(50);
 
-  const [aiCards, setAiCards] = useState<AISuggestion[]>([]);
-  const [aiLoading, setAiLoading] = useState(true);
+  const [hangOuts, setHangOuts] = useState<Hangout[]>([]);
+  const [aiCard, setAiCard] = useState<AISuggestion | null>(null);
+  const [isAiLoading, setIsAiLoading] = useState(true);
   const [aiError, setAiError] = useState<string | null>(null);
   const [tenantId, setTenantId] = useState(defaultTenantId || "");
   const [apiKey, setApiKey] = useState(defaultApiKey || "");
@@ -177,21 +166,11 @@ export default function EventFeed({
     limit,
   });
 
-  const combinedEvents = useMemo(() => {
-    const aiAsEvents: Event[] = aiCards.map((card) => ({
-      id: card.id,
-      title: card.title,
-      description: card.description,
-      tags: card.tags ?? [],
-      location: card.location,
-      createdBy: "ai",
-      createdAt: card.createdAt,
-      source: card.source,
-      startTime: card.startTime,
-      tenantId: tenantId || undefined,
-    }));
+  useEffect(() => {
+    setHangOuts(hangouts);
+  }, [hangouts]);
 
-    const baseEvents = includeAI && showAIEvents ? [...aiAsEvents, ...hangouts] : [...hangouts];
+  const sortedHangouts = useMemo(() => {
     const deduped: Event[] = [];
     const seen = new Set<string>();
 
@@ -202,7 +181,7 @@ export default function EventFeed({
       return `${event.title}-${event.createdAt instanceof Date ? event.createdAt.toISOString() : String(event.createdAt)}`;
     };
 
-    baseEvents.forEach((event) => {
+    hangOuts.forEach((event) => {
       const key = getEventId(event);
       if (!seen.has(key)) {
         seen.add(key);
@@ -250,7 +229,7 @@ export default function EventFeed({
         return Number.POSITIVE_INFINITY;
       }
 
-      const R = 6371; // Earth's radius in km
+      const R = 6371;
       const dLat = toRadians(lat2 - lat1);
       const dLon = toRadians(lon2 - lon1);
       const a =
@@ -269,12 +248,12 @@ export default function EventFeed({
       sorted.sort((a, b) => getEventDate(b).getTime() - getEventDate(a).getTime());
     }
 
-    return sorted.slice(0, 5);
-  }, [aiCards, hangouts, includeAI, showAIEvents, enableSorting, sortBy, userCoordinates, tenantId]);
+    return sorted;
+  }, [hangOuts, enableSorting, sortBy, userCoordinates]);
 
-  const loading = hangoutsLoading || (includeAI && showAIEvents && aiLoading) || tenantResolving;
+  const loading = hangoutsLoading || tenantResolving;
   const locationPending = locationLoading;
-  const combinedErrorMessage = hangoutsError?.message || aiError || null;
+  const combinedErrorMessage = hangoutsError?.message || null;
 
   // Get user's current location on mount
   useEffect(() => {
@@ -436,9 +415,9 @@ export default function EventFeed({
   const fetchAiCard = useCallback(
     async (showLoading: boolean = false) => {
       if (!showAIEvents || !includeAI) {
-        setAiCards([]);
+        setAiCard(null);
         setAiError(null);
-        setAiLoading(false);
+        setIsAiLoading(false);
         return;
       }
 
@@ -446,52 +425,23 @@ export default function EventFeed({
       const hasApiKeyAuth = useApiKey && sanitizedApiKey.length > 0;
 
       if (!hasTenantAuth && !hasApiKeyAuth) {
-        setAiCards([]);
+        setAiCard(null);
         setAiError("Missing tenant or API credentials for AI suggestions.");
-        setAiLoading(false);
+        setIsAiLoading(false);
         return;
       }
 
-      if (showLoading || !aiLoading) {
-        setAiLoading(true);
+      if (showLoading || !isAiLoading) {
+        setIsAiLoading(true);
       }
       setAiError(null);
-
-      let contextHangouts: Event[] = [];
 
       try {
         const locationParam = userCoordinates
           ? `${userCoordinates.lat}, ${userCoordinates.lng}`
           : location;
 
-        try {
-          const contextParams = new URLSearchParams();
-          contextParams.set("limit", "1");
-          contextParams.set("includeAI", "false");
-          contextParams.set("location", locationParam);
-          if (tenantId?.trim()) {
-            contextParams.set("tenantId", tenantId.trim());
-          } else if (hasApiKeyAuth) {
-            contextParams.set("apiKey", sanitizedApiKey);
-          }
-          if (userCoordinates) {
-            contextParams.set("userLat", userCoordinates.lat.toString());
-            contextParams.set("userLng", userCoordinates.lng.toString());
-          }
-          if (tags.length > 0) {
-            contextParams.set("tags", tags.join(","));
-          }
-          contextParams.set("cacheDuration", cacheDuration.toString());
-
-          const contextUrl = `${apiBaseUrl}${fetchEventsEndpoint}?${contextParams.toString()}`;
-          const contextPayload = await fetchAPI<ApiResponse | Event[]>(contextUrl, "GET", undefined, hasTenantAuth);
-          const contextArray = Array.isArray(contextPayload) ? contextPayload : contextPayload.events || [];
-          contextHangouts = contextArray.filter((event) => (event.source ?? "").toLowerCase() !== "ai");
-        } catch (contextError) {
-          console.warn("Context hangouts fetch failed", contextError);
-        }
-
-        const aggregatedCards = contextHangouts.slice(0, 1).map((event) => {
+        const aggregatedCards = hangOuts.slice(0, 1).map((event) => {
           const eventLocation =
             event.location && typeof event.location === "object"
               ? {
@@ -500,16 +450,16 @@ export default function EventFeed({
                 }
               : undefined;
 
-        return {
-          title: event.title,
-          description: event.description,
-          category: event.tags?.[0] ?? "experience",
-          startTime: event.startTime,
-          location:
-            typeof eventLocation?.lat === "number" && typeof eventLocation?.lng === "number"
-              ? { lat: eventLocation.lat, lng: eventLocation.lng }
-              : undefined,
-        };
+          return {
+            title: event.title,
+            description: event.description,
+            category: event.tags?.[0] ?? "experience",
+            startTime: event.startTime,
+            location:
+              typeof eventLocation?.lat === "number" && typeof eventLocation?.lng === "number"
+                ? { lat: eventLocation.lat, lng: eventLocation.lng }
+                : undefined,
+          };
         });
 
         const requestBody: Record<string, unknown> = {
@@ -568,55 +518,22 @@ export default function EventFeed({
           source: "AI",
         };
 
-        setAiCards([aiCard]);
+        setAiCard(aiCard);
         setAiError(null);
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : "Failed to load AI suggestions.";
         console.error("AI suggestion fetch failed", error);
-
-        if (contextHangouts.length > 0) {
-          const fallback = contextHangouts[0];
-          const fallbackLocation =
-            fallback.location && typeof fallback.location === "object"
-              ? {
-                  lat: (fallback.location as { lat?: unknown }).lat,
-                  lng: (fallback.location as { lng?: unknown }).lng,
-                }
-              : undefined;
-
-          setAiCards([
-            {
-              id: fallback.id ?? `context-${Date.now()}`,
-              title: fallback.title ?? "Local Hang Out",
-              description: fallback.description ?? "Suggested by the community",
-              location:
-                typeof fallbackLocation?.lat === "number" && typeof fallbackLocation?.lng === "number"
-                  ? { lat: fallbackLocation.lat, lng: fallbackLocation.lng }
-                  : userCoordinates ?? { lat: 40.7128, lng: -74.006 },
-              createdAt: new Date(),
-              startTime: fallback.startTime,
-              tags: Array.isArray(fallback.tags)
-                ? fallback.tags.filter((tag): tag is string => typeof tag === "string")
-                : undefined,
-              source: "AI",
-            },
-          ]);
-
-          if (message.toLowerCase().includes("rate limit")) {
-            setAiError("OpenAI rate limit reached. Showing a top local hang out instead.");
-          } else {
-            setAiError(message);
-          }
+        setAiCard(null);
+        if (message.toLowerCase().includes("rate limit")) {
+          setAiError("No AI Suggestions right now");
         } else {
-          setAiCards([]);
           setAiError(message);
         }
       } finally {
-        setAiLoading(false);
+        setIsAiLoading(false);
       }
     }, [
       apiBaseUrl,
-      fetchEventsEndpoint,
       includeAI,
       showAIEvents,
       tenantId,
@@ -626,15 +543,16 @@ export default function EventFeed({
       location,
       tags,
       cacheDuration,
-      aiLoading,
+      isAiLoading,
+      hangOuts,
     ]);
 
   // Notify parent when events change (after state update)
   useEffect(() => {
     if (onEventsChange) {
-      onEventsChange(combinedEvents);
+      onEventsChange(sortedHangouts);
     }
-  }, [combinedEvents, onEventsChange]);
+  }, [sortedHangouts, onEventsChange]);
 
   useEffect(() => {
     fetchAiCard(true);
@@ -929,6 +847,44 @@ export default function EventFeed({
         </div>
       )}
 
+      {showAIEvents && includeAI && (
+        <div className="mb-4">
+          {isAiLoading ? (
+            <div className="animate-pulse rounded-xl border border-gray-200 bg-white/70 p-3 shadow-sm">
+              <div className="h-4 w-3/4 rounded bg-gray-200" />
+              <div className="mt-2 h-3 w-full rounded bg-gray-200" />
+              <div className="mt-2 h-3 w-2/3 rounded bg-gray-200" />
+            </div>
+          ) : aiCard ? (
+            <EventCard
+              event={{
+                id: aiCard.id,
+                title: aiCard.title,
+                description: aiCard.description,
+                tags: aiCard.tags ?? [],
+                location: aiCard.location,
+                createdBy: "ai",
+                createdAt: aiCard.createdAt,
+                source: aiCard.source,
+                startTime: aiCard.startTime,
+                tenantId: tenantId || undefined,
+              }}
+              aiBadgeText={aiBadgeText}
+              primaryColor={primaryColor}
+              aiBadgeColor={aiBadgeColor}
+              aiBadgeTextColor={aiBadgeTextColor}
+              aiBackgroundColor={aiBackgroundColor}
+              onMoreInfo={onMoreInfo}
+              onNavigate={handleNavigate}
+            />
+          ) : (
+            <div className="rounded-xl border border-gray-200 bg-white/95 p-3 text-sm text-gray-600 shadow-sm">
+              {aiError ?? "No AI Suggestions right now."}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* API Testing Controls - Only show if enabled */}
       {showTestingControls && (
         <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
@@ -1089,7 +1045,7 @@ export default function EventFeed({
               <button
                 type="button"
                 onClick={() => fetchAiCard(true)}
-                disabled={aiLoading || hangoutsLoading}
+                disabled={isAiLoading || hangoutsLoading}
                 className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
                 aria-label="Refresh hang outs"
               >
@@ -1118,14 +1074,14 @@ export default function EventFeed({
         </div>
       )}
 
-      {combinedEvents.length === 0 ? (
+      {sortedHangouts.length === 0 ? (
         <p className="text-gray-800">No hang outs found. Be the first to create one!</p>
       ) : (
-        combinedEvents.map((event, index) => (
+        sortedHangouts.map((event, index) => (
           <div
             key={event.id}
             id={`event-${event.id}`}
-            className={index === combinedEvents.length - 1 ? "" : "mb-5"}
+            className={index === sortedHangouts.length - 1 ? "" : "mb-5"}
           >
             <EventCard
               event={event}
