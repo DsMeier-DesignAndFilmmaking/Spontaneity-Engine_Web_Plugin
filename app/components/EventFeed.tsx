@@ -10,6 +10,7 @@ import { Event, EventFormData } from "@/lib/types";
 import { getCurrentLocation } from "@/lib/hooks/useGeolocation";
 import { useHangoutsFeed } from "@/lib/hooks/useHangoutsFeed";
 import { getWalkingRoute, type NavigationRoutePayload } from "@/lib/mapbox";
+import { fetchAPI } from "@/lib/api/fetchAPI";
 
 interface ApiResponse {
   events: Event[];
@@ -454,15 +455,9 @@ export default function EventFeed({
           params.set("apiKey", sanitizedApiKey);
         }
 
-        const response = await fetch(`${apiBaseUrl}${fetchEventsEndpoint}?${params.toString()}`, {
-          headers: hasApiKeyAuth ? { "x-api-key": sanitizedApiKey } : undefined,
-        });
+        const requestUrl = `${apiBaseUrl}${fetchEventsEndpoint}?${params.toString()}`;
+        const payload = await fetchAPI<ApiResponse | Event[]>(requestUrl, "GET", undefined, hasTenantAuth);
 
-        if (!response.ok) {
-          throw new Error(`AI suggestion request failed (${response.status})`);
-        }
-
-        const payload: ApiResponse | Event[] = await response.json();
         const eventsArray = Array.isArray(payload) ? payload : payload.events || [];
 
         const aiOnly = eventsArray.filter((event) => {
