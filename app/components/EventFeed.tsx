@@ -283,6 +283,7 @@ export default function EventFeed({
   const [loadingCards, setLoadingCards] = useState(true);
   const [currentCardIndex, setCurrentCardIndex] = useState(0);
   const [currentCardId, setCurrentCardId] = useState<string | null>(null);
+  const [hasAnimatedInitialCard, setHasAnimatedInitialCard] = useState(false);
 
   const fetchingHangouts = hangoutsLoading || tenantResolving;
   const fetchingAi = showAIEvents && includeAI ? isAiLoading : false;
@@ -355,6 +356,18 @@ export default function EventFeed({
       setCurrentCardIndex(0);
     }
   }, [cards, currentCardId, currentCardIndex, loadingCards]);
+
+  // Track whether the very first card has already animated so we only fade-in on initial load.
+  useEffect(() => {
+    if (loadingCards) {
+      setHasAnimatedInitialCard(false);
+      return;
+    }
+
+    if (cards.length > 0 && !hasAnimatedInitialCard) {
+      setHasAnimatedInitialCard(true);
+    }
+  }, [cards.length, hasAnimatedInitialCard, loadingCards]);
 
   const currentAdventure = cards[currentCardIndex] ?? null;
 
@@ -1153,7 +1166,7 @@ Directions: ${navigationLink}`
               <Loader />
             </div>
           ) : currentAdventure ? (
-            <AnimatePresence mode="wait" initial={false}>
+            <AnimatePresence mode="wait" initial={!hasAnimatedInitialCard}>
               <motion.div
                 key={currentAdventure.id ?? `adventure-${currentCardIndex}`}
                 initial={{ opacity: 0, y: 16 }}
