@@ -1,12 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import type { Timestamp } from "firebase/firestore";
 import EventCard from "./EventCard";
 import EventForm from "./EventForm";
 import Loader from "./Loader";
 import { useAuth } from "./AuthContext";
 import { Event, EventFormData } from "@/lib/types";
+import { combineAdventureCards, getNextAdventureIndex, normalizeAdventureIndex } from "@/lib/adventureCards";
+import type { AdventureCard } from "@/lib/adventureCards";
 import { getCurrentLocation } from "@/lib/hooks/useGeolocation";
 import { useHangoutsFeed } from "@/lib/hooks/useHangoutsFeed";
 import { getWalkingRoute, type NavigationRoutePayload } from "@/lib/mapbox";
@@ -274,6 +277,33 @@ export default function EventFeed({
 
     return sorted;
   }, [hangOuts, enableSorting, sortBy, userCoordinates]);
+
+  // Combine AI and user-created adventures to drive the single-card carousel UI.
+  const adventureCards = useMemo<AdventureCard[]>(
+    () =>
+      combineAdventureCards(
+        showAIEvents && includeAI ? aiCards : [],
+        sortedHangouts,
+      ),
+    [aiCards, includeAI, showAIEvents, sortedHangouts],
+  );
+
+  const [currentCardIndex, setCurrentCardIndex] = useState(0);
+
+  // When the available cards change, make sure the current index remains within bounds.
+  useEffect(() => {
+    setCurrentCardIndex((previous) => normalizeAdventureIndex(previous, adventureCards.length));
+  }, [adventureCards.length]);
+
+  const currentAdventure = adventureCards[currentCardIndex] ?? null;
+
+  // Advance to the next adventure card while gracefully wrapping around the list.
+  const handleNextAdventure = useCallback(() => {
+    if (adventureCards.length === 0) {
+      return;
+    }
+    setCurrentCardIndex((previous) => getNextAdventureIndex(previous, adventureCards.length));
+  }, [adventureCards.length]);
 
   const loading = hangoutsLoading || tenantResolving;
   const locationPending = locationLoading;
@@ -829,9 +859,12 @@ Directions: ${navigationLink}`
     setTags(tags.filter(t => t !== tagToRemove));
   };
 
-  if (loading) {
-    return <p className="text-gray-900">Loading hang outs...</p>;
-  }
+  const totalAdventureCards = adventureCards.length;
+  // Treat both Firestore and AI requests as "loading" only while there is nothing to show yet.
+  const isAdventureLoading =
+    (loading && sortedHangouts.length === 0) ||
+    (showAIEvents && includeAI && isAiLoading && aiCards.length === 0);
+  const isAdventureEmpty = totalAdventureCards === 0 && !isAdventureLoading;
 
   return (
     <div className="overflow-y-auto h-full pr-0 md:pr-2">
@@ -859,39 +892,10 @@ Directions: ${navigationLink}`
         </div>
       )}
 
-      {showAIEvents && includeAI && (
-        <div className="mb-4 space-y-3">
-          {isAiLoading ? (
-            <div className="animate-pulse rounded-xl border border-gray-200 bg-white/70 p-3 shadow-sm">
-              <div className="h-4 w-3/4 rounded bg-gray-200" />
-              <div className="mt-2 h-3 w-full rounded bg-gray-200" />
-              <div className="mt-2 h-3 w-2/3 rounded bg-gray-200" />
-            </div>
-          ) : aiCards.length > 0 ? (
-            aiCards.map((card) => (
-              <EventCard
-                key={card.id}
-                event={card}
-                aiBadgeText={aiBadgeText}
-                primaryColor={primaryColor}
-                aiBadgeColor={aiBadgeColor}
-                aiBadgeTextColor={aiBadgeTextColor}
-                aiBackgroundColor={aiBackgroundColor}
-                onMoreInfo={onMoreInfo}
-                onNavigate={handleNavigate}
-              />
-            ))
-          ) : (
-            <div className="rounded-xl border border-gray-200 bg-white/95 p-3 text-sm text-gray-600 shadow-sm">
-              {aiError ?? "No AI Suggestions right now."}
-            </div>
-          )}
-
-          {aiSourceBreakdown && !isAiLoading && (
-            <p className="text-xs text-gray-500">
-              AI sources — OpenAI: {aiSourceBreakdown.openai ?? 0}, Gemini: {aiSourceBreakdown.gemini ?? 0}, Fallback: {aiSourceBreakdown.fallback ?? 0}
-            </p>
-          )}
+      {showAIEvents && includeAI && aiSourceBreakdown && aiCards.length > 0 && (
+        <div className="mb-4 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-700">
+          AI sources — OpenAI: {aiSourceBreakdown.openai ?? 0}, Gemini: {aiSourceBreakdown.gemini ?? 0}, Fallback:{" "}
+          {aiSourceBreakdown.fallback ?? 0}
         </div>
       )}
 
@@ -1084,49 +1088,90 @@ Directions: ${navigationLink}`
         </div>
       )}
 
-      {sortedHangouts.length === 0 ? (
-        <p className="text-gray-800">No hang outs found. Be the first to create one!</p>
-      ) : (
-        sortedHangouts.map((event, index) => (
-          <div
-            key={event.id}
-            id={`event-${event.id}`}
-            className={index === sortedHangouts.length - 1 ? "" : "mb-5"}
-          >
-            <EventCard
-              event={event}
-              aiBadgeText={aiBadgeText}
-              primaryColor={primaryColor}
-              aiBadgeColor={aiBadgeColor}
-              aiBadgeTextColor={aiBadgeTextColor}
-              aiBackgroundColor={aiBackgroundColor}
-              onMoreInfo={onMoreInfo}
-              onNavigate={handleNavigate}
-              onUpdate={
-                event.id &&
-                !event.id.startsWith("AI-") &&
-                event.createdBy !== "ai" &&
-                event.createdBy === user?.uid
-                  ? (updates: Partial<Event>) => {
-                      if (event.id) {
-                        handleUpdate(event.id, updates, event.createdBy);
-                      }
-                    }
-                  : undefined
-              }
-              onDelete={
-                event.id && !event.id.startsWith("AI-") && event.createdBy !== "ai"
-                  ? () => {
-                      if (event.id) {
-                        handleDelete(event.id, event.createdBy);
-                      }
-                    }
-                  : undefined
-              }
-            />
-          </div>
-        ))
-      )}
+      <div className="mt-6 flex flex-1 flex-col">
+        <div className="relative flex-1">
+          {isAdventureLoading ? (
+            <div className="flex h-full min-h-[280px] items-center justify-center rounded-2xl border border-gray-200 bg-white/70 shadow-sm">
+              <Loader />
+            </div>
+          ) : currentAdventure ? (
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.div
+                key={currentAdventure.id ?? `adventure-${currentCardIndex}`}
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -16 }}
+                transition={{ duration: 0.25, ease: "easeOut" }}
+                className="h-full"
+              >
+                {/* Single-card presentation with subtle motion for smoother transitions */}
+                <EventCard
+                  event={currentAdventure}
+                  aiBadgeText={aiBadgeText}
+                  primaryColor={primaryColor}
+                  aiBadgeColor={aiBadgeColor}
+                  aiBadgeTextColor={aiBadgeTextColor}
+                  aiBackgroundColor={aiBackgroundColor}
+                  onMoreInfo={onMoreInfo}
+                  onNavigate={handleNavigate}
+                  onUpdate={
+                    currentAdventure.origin === "user" &&
+                    currentAdventure.id &&
+                    !currentAdventure.id.startsWith("AI-") &&
+                    currentAdventure.createdBy !== "ai" &&
+                    currentAdventure.createdBy === user?.uid
+                      ? (updates: Partial<Event>) => {
+                          if (currentAdventure.id) {
+                            handleUpdate(currentAdventure.id, updates, currentAdventure.createdBy);
+                          }
+                        }
+                      : undefined
+                  }
+                  onDelete={
+                    currentAdventure.origin === "user" &&
+                    currentAdventure.id &&
+                    !currentAdventure.id.startsWith("AI-") &&
+                    currentAdventure.createdBy !== "ai"
+                      ? () => {
+                          if (currentAdventure.id) {
+                            handleDelete(currentAdventure.id, currentAdventure.createdBy);
+                          }
+                        }
+                      : undefined
+                  }
+                />
+              </motion.div>
+            </AnimatePresence>
+          ) : (
+            <div className="flex h-full min-h-[280px] items-center justify-center rounded-2xl border border-dashed border-gray-200 bg-white/70 px-6 text-center text-sm font-medium text-gray-600">
+              No Adventure Cards Available
+            </div>
+          )}
+        </div>
+
+        <button
+          type="button"
+          onClick={handleNextAdventure}
+          disabled={totalAdventureCards <= 1}
+          className="mt-4 inline-flex items-center justify-center gap-2 rounded-full bg-blue-600 px-6 py-3 text-sm font-semibold text-white shadow-lg transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+          aria-label="View the next adventure card"
+        >
+          Next Adventure
+          <span aria-hidden="true" className="text-base leading-none">
+            →
+          </span>
+        </button>
+
+        {totalAdventureCards > 0 && (
+          <p className="mt-2 text-xs text-gray-500">
+            Adventure {currentCardIndex + 1} of {totalAdventureCards}
+          </p>
+        )}
+
+        {isAdventureEmpty && showAIEvents && includeAI && aiError && (
+          <p className="mt-3 text-xs font-medium text-red-600">{aiError}</p>
+        )}
+      </div>
 
       {navigationLoading && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
