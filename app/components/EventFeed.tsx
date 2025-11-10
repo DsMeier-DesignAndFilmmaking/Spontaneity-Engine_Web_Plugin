@@ -289,6 +289,7 @@ export default function EventFeed({
     activeId: null,
   });
   const [loadingCards, setLoadingCards] = useState(true);
+  const [displayedCard, setDisplayedCard] = useState<AdventureCard | null>(null);
   const [hasAnimatedInitialCard, setHasAnimatedInitialCard] = useState(false);
 
   const fetchingHangouts = hangoutsLoading || tenantResolving;
@@ -299,17 +300,22 @@ export default function EventFeed({
     setLoadingCards(stillLoading);
 
     if (stillLoading) {
+      setDisplayedCard(null);
       return;
     }
 
     const combined = combineAdventureCards(showAIEvents && includeAI ? aiCards : [], sortedHangouts);
 
+    let nextSnapshot: { cards: AdventureCard[]; currentIndex: number; activeId: string | null } | null = null;
+
     setCarouselState((previous) => {
       if (combined.length === 0) {
         if (previous.cards.length === 0 && previous.currentIndex === 0 && previous.activeId === null) {
+          nextSnapshot = previous;
           return previous;
         }
-        return { cards: [], currentIndex: 0, activeId: null };
+        nextSnapshot = { cards: [], currentIndex: 0, activeId: null };
+        return nextSnapshot;
       }
 
       const isSameSequence =
@@ -326,15 +332,26 @@ export default function EventFeed({
       const safeId = combined[safeIndex]?.id ?? null;
 
       if (isSameSequence && previous.currentIndex === safeIndex && previous.activeId === safeId) {
+        nextSnapshot = previous;
         return previous;
       }
 
-      return {
+      nextSnapshot = {
         cards: combined,
         currentIndex: safeIndex,
         activeId: safeId,
       };
+
+      return nextSnapshot;
     });
+
+    if (nextSnapshot) {
+      setDisplayedCard(
+        nextSnapshot.cards.length > 0 ? nextSnapshot.cards[Math.max(0, nextSnapshot.currentIndex)] ?? null : null,
+      );
+    } else {
+      setDisplayedCard(null);
+    }
   }, [aiCards, fetchingAi, fetchingHangouts, includeAI, showAIEvents, sortedHangouts]);
 
   useEffect(() => {
@@ -349,20 +366,30 @@ export default function EventFeed({
   }, [carouselState.cards.length, hasAnimatedInitialCard, loadingCards]);
 
   const { cards, currentIndex: currentCardIndex } = carouselState;
-  const currentAdventure = cards[currentCardIndex] ?? null;
+  const currentAdventure = displayedCard;
 
   const handleNextAdventure = useCallback(() => {
+    let nextSnapshot: { cards: AdventureCard[]; currentIndex: number; activeId: string | null } | null = null;
+
     setCarouselState((previous) => {
       if (previous.cards.length === 0) {
+        nextSnapshot = previous;
         return previous;
       }
       const nextIndex = getNextAdventureIndex(previous.currentIndex, previous.cards.length);
-      return {
+      nextSnapshot = {
         cards: previous.cards,
         currentIndex: nextIndex,
         activeId: previous.cards[nextIndex]?.id ?? previous.activeId,
       };
+      return nextSnapshot;
     });
+
+    if (nextSnapshot) {
+      setDisplayedCard(
+        nextSnapshot.cards.length > 0 ? nextSnapshot.cards[Math.max(0, nextSnapshot.currentIndex)] ?? null : null,
+      );
+    }
   }, []);
 
   const totalAdventureCards = cards.length;
