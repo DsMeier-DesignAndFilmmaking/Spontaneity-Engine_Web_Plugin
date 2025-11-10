@@ -279,10 +279,16 @@ export default function EventFeed({
   }, [hangOuts, enableSorting, sortBy, userCoordinates]);
 
   // Unified adventure card store to prevent partial renders and card flicker.
-  const [cards, setCards] = useState<AdventureCard[]>([]);
+  const [carouselState, setCarouselState] = useState<{
+    cards: AdventureCard[];
+    currentIndex: number;
+    activeId: string | null;
+  }>({
+    cards: [],
+    currentIndex: 0,
+    activeId: null,
+  });
   const [loadingCards, setLoadingCards] = useState(true);
-  const [currentCardIndex, setCurrentCardIndex] = useState(0);
-  const [currentCardId, setCurrentCardId] = useState<string | null>(null);
   const [hasAnimatedInitialCard, setHasAnimatedInitialCard] = useState(false);
 
   const fetchingHangouts = hangoutsLoading || tenantResolving;
@@ -298,87 +304,66 @@ export default function EventFeed({
 
     const combined = combineAdventureCards(showAIEvents && includeAI ? aiCards : [], sortedHangouts);
 
-    setCards((previous) => {
-      if (
-        previous.length === combined.length &&
-        previous.every((card, index) => card.id === combined[index]?.id)
-      ) {
+    setCarouselState((previous) => {
+      if (combined.length === 0) {
+        if (previous.cards.length === 0 && previous.currentIndex === 0 && previous.activeId === null) {
+          return previous;
+        }
+        return { cards: [], currentIndex: 0, activeId: null };
+      }
+
+      const isSameSequence =
+        previous.cards.length === combined.length &&
+        previous.cards.every((card, index) => card.id === combined[index]?.id);
+
+      const fallbackId =
+        (previous.activeId && combined.some((card) => card.id === previous.activeId)
+          ? previous.activeId
+          : combined[0]?.id) ?? null;
+
+      const derivedIndex = fallbackId ? combined.findIndex((card) => card.id === fallbackId) : 0;
+      const safeIndex = derivedIndex >= 0 ? derivedIndex : 0;
+      const safeId = combined[safeIndex]?.id ?? null;
+
+      if (isSameSequence && previous.currentIndex === safeIndex && previous.activeId === safeId) {
         return previous;
       }
-      return combined;
+
+      return {
+        cards: combined,
+        currentIndex: safeIndex,
+        activeId: safeId,
+      };
     });
   }, [aiCards, fetchingAi, fetchingHangouts, includeAI, showAIEvents, sortedHangouts]);
 
-  useEffect(() => {
-    if (loadingCards) {
-      return;
-    }
-
-    if (cards.length === 0) {
-      if (currentCardIndex !== 0) {
-        setCurrentCardIndex(0);
-      }
-      if (currentCardId !== null) {
-        setCurrentCardId(null);
-      }
-      return;
-    }
-
-    const activeId = currentCardId ?? cards[0]?.id ?? null;
-
-    if (!activeId) {
-      const fallbackId = cards[0]?.id ?? null;
-      if (currentCardId !== fallbackId) {
-        setCurrentCardId(fallbackId);
-      }
-      if (currentCardIndex !== 0) {
-        setCurrentCardIndex(0);
-      }
-      return;
-    }
-
-    const nextIndex = cards.findIndex((card) => card.id === activeId);
-    if (nextIndex >= 0) {
-      if (currentCardIndex !== nextIndex) {
-        setCurrentCardIndex(nextIndex);
-      }
-      if (currentCardId !== activeId) {
-        setCurrentCardId(activeId);
-      }
-      return;
-    }
-
-    const fallbackId = cards[0]?.id ?? null;
-    if (currentCardId !== fallbackId) {
-      setCurrentCardId(fallbackId);
-    }
-    if (currentCardIndex !== 0) {
-      setCurrentCardIndex(0);
-    }
-  }, [cards, currentCardId, currentCardIndex, loadingCards]);
-
-  // Track whether the very first card has already animated so we only fade-in on initial load.
   useEffect(() => {
     if (loadingCards) {
       setHasAnimatedInitialCard(false);
       return;
     }
 
-    if (cards.length > 0 && !hasAnimatedInitialCard) {
+    if (carouselState.cards.length > 0 && !hasAnimatedInitialCard) {
       setHasAnimatedInitialCard(true);
     }
-  }, [cards.length, hasAnimatedInitialCard, loadingCards]);
+  }, [carouselState.cards.length, hasAnimatedInitialCard, loadingCards]);
 
+  const { cards, currentIndex: currentCardIndex } = carouselState;
   const currentAdventure = cards[currentCardIndex] ?? null;
 
   const handleNextAdventure = useCallback(() => {
-    if (cards.length === 0) {
-      return;
-    }
-    const nextIndex = getNextAdventureIndex(currentCardIndex, cards.length);
-    setCurrentCardIndex(nextIndex);
-    setCurrentCardId(cards[nextIndex]?.id ?? null);
-  }, [cards, currentCardIndex]);
+    setCarouselState((previous) => {
+      if (previous.cards.length === 0) {
+        return previous;
+      }
+      const nextIndex = getNextAdventureIndex(previous.currentIndex, previous.cards.length);
+      return {
+        cards: previous.cards,
+        currentIndex: nextIndex,
+        activeId: previous.cards[nextIndex]?.id ?? previous.activeId,
+      };
+    });
+  }, []);
 
   const totalAdventureCards = cards.length;
   const showInitialLoader = loadingCards && totalAdventureCards === 0;
