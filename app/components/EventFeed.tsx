@@ -14,6 +14,17 @@ import { getCurrentLocation } from "@/lib/hooks/useGeolocation";
 import { useHangoutsFeed } from "@/lib/hooks/useHangoutsFeed";
 import { getWalkingRoute, type NavigationRoutePayload } from "@/lib/mapbox";
 
+/**
+ * The previous panel rendered AI and Firestore cards as soon as each async branch finished. Because
+ * the fetches resolved at different times, React re-rendered multiple times with partially populated
+ * data, causing the user-facing card area to flicker. This refactor establishes a strict lifecycle:
+ *   1. Mount → show a single skeleton loader.
+ *   2. Prefetch Firestore + AI cards in parallel.
+ *   3. Commit one atomic state update once both datasets are ready.
+ *   4. Flip `readyToRender` to true and fade the first real card in with Framer Motion.
+ * No card DOM ever renders before the data is complete, eliminating flicker entirely.
+ */
+
 type Hangout = Event;
 
 interface AiApiCard {
@@ -45,50 +56,6 @@ interface UpdateEventPayload {
   tenantId?: string;
 }
 
-type CarouselSnapshot = {
-  cards: AdventureCard[];
-  currentIndex: number;
-  activeId: string | null;
-};
-
-function deriveCarouselSnapshot(previous: CarouselSnapshot, combined: AdventureCard[]): CarouselSnapshot {
-  if (combined.length === 0) {
-    if (previous.cards.length === 0 && previous.currentIndex === 0 && previous.activeId === null) {
-      return previous;
-    }
-    return { cards: [], currentIndex: 0, activeId: null };
-  }
-
-  const isSameSequence =
-    previous.cards.length === combined.length && previous.cards.every((card, index) => card.id === combined[index]?.id);
-
-  const fallbackId =
-    (previous.activeId && combined.some((card) => card.id === previous.activeId)
-      ? previous.activeId
-      : combined[0]?.id) ?? null;
-
-  const derivedIndex = fallbackId ? combined.findIndex((card) => card.id === fallbackId) : 0;
-  const safeIndex = derivedIndex >= 0 ? derivedIndex : 0;
-  const safeId = combined[safeIndex]?.id ?? null;
-
-  if (isSameSequence && previous.currentIndex === safeIndex && previous.activeId === safeId) {
-    return previous;
-  }
-
-  return {
-    cards: combined,
-    currentIndex: safeIndex,
-    activeId: safeId,
-  };
-}
-
-const selectDisplayedCard = (snapshot: CarouselSnapshot): AdventureCard | null => {
-  if (snapshot.cards.length === 0) {
-    return null;
-  }
-  return snapshot.cards[Math.max(0, snapshot.currentIndex)] ?? null;
-};
-
 interface EventFeedProps {
   onEventsChange?: (events: Event[]) => void;
   defaultApiKey?: string;
@@ -98,22 +65,40 @@ interface EventFeedProps {
   enableSorting?: boolean;
   defaultSortBy?: "newest" | "nearest";
   aiBadgeText?: string;
-  eventLabel?: string; // "Hang Out", "Event", etc.
-  cacheDuration?: number; // minutes
-  pollingInterval?: number; // seconds
-  // API endpoint overrides for embedding flexibility
-  apiBaseUrl?: string; // Override base URL for API endpoints (default: "")
-  submitEventEndpoint?: string; // Custom submit event endpoint (default: "/api/plugin/submit-event")
-  updateEventEndpoint?: string; // Custom update event endpoint (default: "/api/plugin/update-event")
-  deleteEventEndpoint?: string; // Custom delete event endpoint (default: "/api/plugin/delete-event")
-  // Theme customization
-  primaryColor?: string; // For buttons, markers, accents
-  aiBadgeColor?: string; // Background color for AI badge
-  aiBadgeTextColor?: string; // Text color for AI badge
-  aiBackgroundColor?: string; // Background color for AI event cards
+  eventLabel?: string;
+  cacheDuration?: number;
+  pollingInterval?: number;
+  apiBaseUrl?: string;
+  submitEventEndpoint?: string;
+  updateEventEndpoint?: string;
+  deleteEventEndpoint?: string;
+  primaryColor?: string;
+  aiBadgeColor?: string;
+  aiBadgeTextColor?: string;
+  aiBackgroundColor?: string;
   onNavigationRouteChange?: (payload: NavigationRoutePayload | null) => void;
   onMoreInfo?: (event: Event) => void;
 }
+
+interface CarouselSnapshot {
+  cards: AdventureCard[];
+  currentIndex: number;
+  activeId: string | null;
+}
+
+const haveSameCardOrder = (a: AdventureCard[], b: AdventureCard[]): boolean => {
+  if (a.length !== b.length) {
+    return false;
+  }
+  return a.every((card, index) => card.id === b[index]?.id);
+};
+
+const selectDisplayedCard = (snapshot: CarouselSnapshot): AdventureCard | null => {
+  if (snapshot.cards.length === 0) {
+    return null;
+  }
+  return snapshot.cards[Math.max(0, snapshot.currentIndex)] ?? null;
+};
 
 const EARTH_RADIUS_METERS = 6_371_000;
 
@@ -203,25 +188,24 @@ export default function EventFeed({
     message: string;
   } | null>(null);
 
-  // API query parameters for testing
   const [includeAI, setIncludeAI] = useState(showAIEvents);
   const [sortBy, setSortBy] = useState<"newest" | "nearest">(defaultSortBy);
-  const [location, setLocation] = useState<string>("New York"); // Default fallback
+  const [location, setLocation] = useState<string>("New York");
   const [userCoordinates, setUserCoordinates] = useState<{ lat: number; lng: number } | null>(null);
   const [locationLoading, setLocationLoading] = useState(false);
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
   const [limit, setLimit] = useState(50);
 
-  const [hangOuts, setHangOuts] = useState<Hangout[]>([]);
-  const [aiCards, setAiCards] = useState<Event[]>([]);
   const [aiSourceBreakdown, setAiSourceBreakdown] = useState<{
     openai: number;
     gemini: number;
     fallback: number;
   } | null>(null);
-  const [isAiLoading, setIsAiLoading] = useState(true);
   const [aiError, setAiError] = useState<string | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiReady, setAiReady] = useState(false);
+
   const [tenantId, setTenantId] = useState(defaultTenantId || "");
   const [apiKey, setApiKey] = useState(defaultApiKey || "");
   const [useApiKey, setUseApiKey] = useState(!!defaultApiKey);
@@ -237,10 +221,6 @@ export default function EventFeed({
     limit,
   });
 
-  useEffect(() => {
-    setHangOuts(hangouts);
-  }, [hangouts]);
-
   const sortedHangouts = useMemo(() => {
     const deduped: Event[] = [];
     const seen = new Set<string>();
@@ -249,10 +229,12 @@ export default function EventFeed({
       if (event.id) {
         return event.id;
       }
-      return `${event.title}-${event.createdAt instanceof Date ? event.createdAt.toISOString() : String(event.createdAt)}`;
+      return `${event.title}-${
+        event.createdAt instanceof Date ? event.createdAt.toISOString() : String(event.createdAt)
+      }`;
     };
 
-    hangOuts.forEach((event) => {
+    hangouts.forEach((event) => {
       const key = getEventId(event);
       if (!seen.has(key)) {
         seen.add(key);
@@ -281,8 +263,6 @@ export default function EventFeed({
       return new Date(0);
     };
 
-    const toRadians = (deg: number) => (deg * Math.PI) / 180;
-
     const distanceFromUser = (event: Event) => {
       if (!userCoordinates || !event.location) {
         return Number.POSITIVE_INFINITY;
@@ -300,13 +280,14 @@ export default function EventFeed({
         return Number.POSITIVE_INFINITY;
       }
 
+      const toRadians = (deg: number) => (deg * Math.PI) / 180;
       const R = 6371;
       const dLat = toRadians(lat2 - lat1);
       const dLon = toRadians(lon2 - lon1);
       const a =
         Math.sin(dLat / 2) * Math.sin(dLat / 2) +
         Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) *
-        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+          Math.sin(dLon / 2) * Math.sin(dLon / 2);
       const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
       return R * c;
     };
@@ -320,77 +301,254 @@ export default function EventFeed({
     }
 
     return sorted;
-  }, [hangOuts, enableSorting, sortBy, userCoordinates]);
+  }, [hangouts, enableSorting, sortBy, userCoordinates]);
 
-  // Unified adventure card store to prevent partial renders and card flicker.
-  const [carouselState, setCarouselState] = useState<CarouselSnapshot>({
+  const [panelState, setPanelState] = useState<CarouselSnapshot>({
     cards: [],
     currentIndex: 0,
     activeId: null,
   });
-  const [loadingCards, setLoadingCards] = useState(true);
-  const [displayedCard, setDisplayedCard] = useState<AdventureCard | null>(null);
-  const [hasAnimatedInitialCard, setHasAnimatedInitialCard] = useState(false);
+  const [readyToRender, setReadyToRender] = useState(false);
+  const initialAnimationPlayedRef = useRef(false);
+  const aiCardsRef = useRef<Event[]>([]);
+  const [initialHangoutsReady, setInitialHangoutsReady] = useState(false);
 
-  const fetchingHangouts = hangoutsLoading || tenantResolving;
-  const fetchingAi = showAIEvents && includeAI ? isAiLoading : false;
+  const commitCombinedCards = useCallback(
+    (options?: { resetIndex?: boolean }) => {
+      const aiCards = showAIEvents && includeAI ? aiCardsRef.current : [];
+      const combined = combineAdventureCards(aiCards, sortedHangouts);
+
+      setPanelState((previous) => {
+        const previousActiveId = options?.resetIndex ? null : previous.activeId;
+        const candidateActiveId = previousActiveId ?? previous.cards[previous.currentIndex]?.id ?? null;
+
+        let resolvedIndex = 0;
+        if (candidateActiveId) {
+          const nextIndex = combined.findIndex((card) => card.id === candidateActiveId);
+          resolvedIndex = nextIndex >= 0 ? nextIndex : 0;
+        }
+
+        if (combined.length === 0) {
+          resolvedIndex = 0;
+        } else if (resolvedIndex >= combined.length) {
+          resolvedIndex = combined.length - 1;
+        }
+
+        const nextActiveId = combined.length > 0 ? combined[resolvedIndex]?.id ?? null : null;
+
+        if (
+          haveSameCardOrder(previous.cards, combined) &&
+          previous.currentIndex === resolvedIndex &&
+          previous.activeId === nextActiveId
+        ) {
+          return previous;
+        }
+
+        return {
+          cards: combined,
+          currentIndex: resolvedIndex,
+          activeId: nextActiveId,
+        };
+      });
+    },
+    [includeAI, showAIEvents, sortedHangouts],
+  );
+
+  const loadAiSuggestions = useCallback(
+    async ({ showSpinner, resetIndex }: { showSpinner: boolean; resetIndex?: boolean } = { showSpinner: false }) => {
+      if (!showAIEvents || !includeAI) {
+        aiCardsRef.current = [];
+        setAiSourceBreakdown(null);
+        setAiError(null);
+        setAiReady(true);
+        if (readyToRender) {
+          commitCombinedCards({ resetIndex });
+        }
+        return;
+      }
+
+      if (showSpinner) {
+        setAiLoading(true);
+      }
+
+      try {
+        const fallbackCoordinates =
+          userCoordinates && typeof userCoordinates.lat === "number" && typeof userCoordinates.lng === "number"
+            ? userCoordinates
+            : { lat: 40.7128, lng: -74.006 };
+
+        const params = new URLSearchParams({
+          lat: fallbackCoordinates.lat.toString(),
+          lon: fallbackCoordinates.lng.toString(),
+        });
+
+        const primaryMood = tags.find((tag) => tag && tag.trim().length > 0) ?? "spontaneous";
+        params.set("mood", primaryMood);
+
+        const response = await fetch(`${apiBaseUrl}/api/spontaneous-cards?${params.toString()}`, {
+          method: "GET",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+        });
+
+        if (!response.ok) {
+          const textResponse = await response.text().catch(() => response.statusText);
+          throw new Error(textResponse || `Failed to load AI suggestions (${response.status})`);
+        }
+
+        const payload = (await response.json()) as {
+          aiCards?: AiApiCard[];
+          sources?: { openai?: number; gemini?: number; fallback?: number };
+          diagnostics?: { errors?: string[] };
+        };
+
+        const cards = Array.isArray(payload?.aiCards) ? payload.aiCards : [];
+
+        const mappedCards: Event[] = cards
+          .map((card, index) => {
+            const title = sanitizeCardTitle(card?.title, index);
+            const description = sanitizeCardDescription(card?.description);
+            const vibeTags = Array.isArray(card?.vibeTags)
+              ? card.vibeTags
+                  .map((tag) => (typeof tag === "string" ? tag.trim() : ""))
+                  .filter((tag) => tag.length > 0)
+                  .slice(0, 4)
+              : [];
+            const navigationLink = normalizeNavigationLink(card?.navigationLink);
+
+            const decoratedDescription = navigationLink
+              ? `${description}
+
+Directions: ${navigationLink}`
+              : description;
+
+            return {
+              id: `AI-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 32)}-${index}-${Date.now()}`,
+              title,
+              description: decoratedDescription,
+              tags: vibeTags,
+              location: fallbackCoordinates,
+              createdBy: "ai",
+              createdAt: new Date(),
+              source: "AI" as const,
+              tenantId: tenantId || undefined,
+            } as Event;
+          })
+          .filter((card) => card.title.length > 0 && card.description.length > 0);
+
+        aiCardsRef.current = mappedCards;
+
+        if (payload?.sources) {
+          setAiSourceBreakdown({
+            openai: Number(payload.sources.openai ?? 0),
+            gemini: Number(payload.sources.gemini ?? 0),
+            fallback: Number(payload.sources.fallback ?? 0),
+          });
+        } else {
+          setAiSourceBreakdown(null);
+        }
+
+        if (payload?.diagnostics?.errors?.length) {
+          console.warn("AI diagnostics", payload.diagnostics.errors);
+        }
+
+        setAiError(null);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : "Failed to load AI suggestions.";
+        console.error("AI suggestion fetch failed", error);
+        aiCardsRef.current = [];
+        setAiSourceBreakdown(null);
+        setAiError(message);
+      } finally {
+        if (showSpinner) {
+          setAiLoading(false);
+        }
+        setAiReady(true);
+        if (readyToRender) {
+          commitCombinedCards({ resetIndex });
+        }
+      }
+    },
+    [
+      apiBaseUrl,
+      includeAI,
+      showAIEvents,
+      userCoordinates,
+      tags,
+      tenantId,
+      readyToRender,
+      commitCombinedCards,
+    ],
+  );
 
   useEffect(() => {
-    const stillLoading = fetchingHangouts || fetchingAi;
-    setLoadingCards(stillLoading);
-
-    if (stillLoading) {
-      setDisplayedCard(null);
-      return;
-    }
-
-    const combined = combineAdventureCards(showAIEvents && includeAI ? aiCards : [], sortedHangouts);
-    setCarouselState((previous) => {
-      const snapshot = deriveCarouselSnapshot(previous, combined);
-      setDisplayedCard(selectDisplayedCard(snapshot));
-      return snapshot;
-    });
-  }, [aiCards, fetchingAi, fetchingHangouts, includeAI, showAIEvents, sortedHangouts]);
+    let cancelled = false;
+    const bootstrap = async () => {
+      await loadAiSuggestions({ showSpinner: true, resetIndex: true });
+      if (!cancelled) {
+        setAiReady(true);
+      }
+    };
+    void bootstrap();
+    return () => {
+      cancelled = true;
+    };
+  }, [loadAiSuggestions]);
 
   useEffect(() => {
-    if (loadingCards) {
-      setHasAnimatedInitialCard(false);
+    if (!initialHangoutsReady && !hangoutsLoading) {
+      setInitialHangoutsReady(true);
+    }
+  }, [hangoutsLoading, initialHangoutsReady]);
+
+  useEffect(() => {
+    if (readyToRender) {
       return;
     }
-
-    if (carouselState.cards.length > 0 && !hasAnimatedInitialCard) {
-      setHasAnimatedInitialCard(true);
+    if (!aiReady || !initialHangoutsReady) {
+      return;
     }
-  }, [carouselState.cards.length, hasAnimatedInitialCard, loadingCards]);
+    commitCombinedCards({ resetIndex: true });
+    setReadyToRender(true);
+  }, [aiReady, initialHangoutsReady, readyToRender, commitCombinedCards]);
 
-  const { cards, currentIndex: currentCardIndex } = carouselState;
-  const currentAdventure = displayedCard;
+  useEffect(() => {
+    if (!readyToRender) {
+      return;
+    }
+    commitCombinedCards();
+  }, [sortedHangouts, includeAI, showAIEvents, readyToRender, commitCombinedCards]);
+
+  useEffect(() => {
+    if (readyToRender && !initialAnimationPlayedRef.current) {
+      initialAnimationPlayedRef.current = true;
+    }
+  }, [readyToRender]);
+
+  const currentAdventure = readyToRender ? selectDisplayedCard(panelState) : null;
+  const totalAdventureCards = panelState.cards.length;
+  const noAdventuresAvailable = readyToRender && totalAdventureCards === 0;
 
   const handleNextAdventure = useCallback(() => {
-    setCarouselState((previous) => {
+    setPanelState((previous) => {
       if (previous.cards.length === 0) {
-        setDisplayedCard(null);
         return previous;
       }
       const nextIndex = getNextAdventureIndex(previous.currentIndex, previous.cards.length);
-      const snapshot: CarouselSnapshot = {
+      if (nextIndex === previous.currentIndex) {
+        return previous;
+      }
+      return {
         cards: previous.cards,
         currentIndex: nextIndex,
-        activeId: previous.cards[nextIndex]?.id ?? previous.activeId,
+        activeId: previous.cards[nextIndex]?.id ?? null,
       };
-      setDisplayedCard(selectDisplayedCard(snapshot));
-      return snapshot;
     });
   }, []);
-
-  const totalAdventureCards = cards.length;
-  const showInitialLoader = loadingCards && totalAdventureCards === 0;
-  const isAdventureEmpty = !loadingCards && totalAdventureCards === 0;
 
   const locationPending = locationLoading;
   const combinedErrorMessage = hangoutsError?.message || null;
 
-  // Get user's current location on mount
   useEffect(() => {
     const fetchUserLocation = async () => {
       setLocationLoading(true);
@@ -398,36 +556,29 @@ export default function EventFeed({
         const coords = await getCurrentLocation({
           enableHighAccuracy: true,
           timeout: 10000,
-          maximumAge: 300000, // Cache for 5 minutes
+          maximumAge: 300000,
         });
 
         setUserCoordinates({ lat: coords.latitude, lng: coords.longitude });
 
-        // Reverse geocode to get city name (using server-side API to protect Mapbox key)
         try {
-          const response = await fetch(
-            `/api/geocode?lng=${coords.longitude}&lat=${coords.latitude}`
-          );
+          const response = await fetch(`/api/geocode?lng=${coords.longitude}&lat=${coords.latitude}`);
           if (response.ok) {
             const data = await response.json();
             if (data.placeName) {
               setLocation(data.placeName);
             } else {
-              // Fallback to coordinates
               setLocation(`${coords.latitude.toFixed(4)}, ${coords.longitude.toFixed(4)}`);
             }
           } else {
-            // Fallback to coordinates if geocoding fails
             setLocation(`${coords.latitude.toFixed(4)}, ${coords.longitude.toFixed(4)}`);
           }
         } catch (geocodeError) {
           console.warn("Reverse geocoding failed, using coordinates:", geocodeError);
-          // Fallback to coordinates
           setLocation(`${coords.latitude.toFixed(4)}, ${coords.longitude.toFixed(4)}`);
         }
       } catch (error: unknown) {
         console.warn("Failed to get user location:", error);
-        // Keep default "New York" if location fails
         setLocation("New York");
       } finally {
         setLocationLoading(false);
@@ -484,7 +635,7 @@ export default function EventFeed({
               name: target.title,
             };
 
-            const MAX_WALKING_DISTANCE_METERS = 200_000; // ~200 km safeguard
+            const MAX_WALKING_DISTANCE_METERS = 200_000;
             const straightLineDistance = haversineDistanceMeters(originCoords, destinationCoords);
 
             if (straightLineDistance > MAX_WALKING_DISTANCE_METERS) {
@@ -545,141 +696,6 @@ export default function EventFeed({
     },
     [showNotification, onNavigationRouteChange]
   );
-
-  const fetchAiSuggestions = useCallback(
-    async (showLoading: boolean = false) => {
-      if (!showAIEvents || !includeAI) {
-        setAiCards([]);
-        setAiSourceBreakdown(null);
-        setAiError(null);
-        setIsAiLoading(false);
-        return;
-      }
-
-      if (showLoading || !isAiLoading) {
-        setIsAiLoading(true);
-      }
-      setAiError(null);
-
-      const fallbackCoordinates =
-        userCoordinates && typeof userCoordinates.lat === "number" && typeof userCoordinates.lng === "number"
-          ? userCoordinates
-          : { lat: 40.7128, lng: -74.006 };
-
-      try {
-        const params = new URLSearchParams({
-          lat: fallbackCoordinates.lat.toString(),
-          lon: fallbackCoordinates.lng.toString(),
-        });
-
-        const primaryMood = tags.find((tag) => tag && tag.trim().length > 0) ?? "spontaneous";
-        params.set("mood", primaryMood);
-
-        const response = await fetch(`${apiBaseUrl}/api/spontaneous-cards?${params.toString()}`, {
-          method: "GET",
-          headers: { "Content-Type": "application/json" },
-          cache: "no-store",
-        });
-
-        if (!response.ok) {
-          const textResponse = await response.text().catch(() => response.statusText);
-          throw new Error(textResponse || `Failed to load AI suggestions (${response.status})`);
-        }
-
-        const payload = (await response.json()) as {
-          aiCards?: AiApiCard[];
-          sources?: { openai?: number; gemini?: number; fallback?: number };
-          diagnostics?: { errors?: string[] };
-        };
-
-        const cards = Array.isArray(payload?.aiCards) ? payload.aiCards : [];
-
-        const mappedCards: Event[] = cards
-          .map((card, index) => {
-            const title = sanitizeCardTitle(card?.title, index);
-            const description = sanitizeCardDescription(card?.description);
-            const vibeTags = Array.isArray(card?.vibeTags)
-              ? card.vibeTags
-                  .map((tag) => (typeof tag === "string" ? tag.trim() : ""))
-                  .filter((tag) => tag.length > 0)
-                  .slice(0, 4)
-              : [];
-            const navigationLink = normalizeNavigationLink(card?.navigationLink);
-
-            const decoratedDescription = navigationLink
-              ? `${description}
-
-Directions: ${navigationLink}`
-              : description;
-
-            return {
-              id: `AI-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 32)}-${index}-${Date.now()}`,
-              title,
-              description: decoratedDescription,
-              tags: vibeTags,
-              location: fallbackCoordinates,
-              createdBy: "ai",
-              createdAt: new Date(),
-              source: "AI" as const,
-              tenantId: tenantId || undefined,
-            } as Event;
-          })
-          .filter((card) => card.title.length > 0 && card.description.length > 0);
-
-        if (mappedCards.length === 0) {
-          setAiCards([]);
-          setAiSourceBreakdown(
-            payload?.sources
-              ? {
-                  openai: Number(payload.sources.openai ?? 0),
-                  gemini: Number(payload.sources.gemini ?? 0),
-                  fallback: Number(payload.sources.fallback ?? 0),
-                }
-              : null,
-          );
-          setAiError("No AI Suggestions at the moment");
-          return;
-        }
-
-        if (payload?.sources) {
-          setAiSourceBreakdown({
-            openai: Number(payload.sources.openai ?? 0),
-            gemini: Number(payload.sources.gemini ?? 0),
-            fallback: Number(payload.sources.fallback ?? 0),
-          });
-        } else {
-          setAiSourceBreakdown(null);
-        }
-
-        if (payload?.diagnostics?.errors?.length) {
-          console.warn("AI diagnostics", payload.diagnostics.errors);
-        }
-
-        setAiCards(mappedCards);
-        setAiError(null);
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : "Failed to load AI suggestions.";
-        console.error("AI suggestion fetch failed", error);
-        setAiCards([]);
-        setAiSourceBreakdown(null);
-        setAiError(message);
-      } finally {
-        setIsAiLoading(false);
-      }
-    },
-    [apiBaseUrl, includeAI, showAIEvents, isAiLoading, userCoordinates, tags, tenantId],
-  );
-
-  // Notify parent when events change (after state update)
-  useEffect(() => {
-    if (onEventsChange) {
-      onEventsChange(sortedHangouts);
-    }
-  }, [sortedHangouts, onEventsChange]);
-
-  useEffect(() => {
-    fetchAiSuggestions(true);
-  }, [fetchAiSuggestions]);
 
   useEffect(() => {
     if (!useApiKey || sanitizedApiKey.length === 0) {
@@ -769,30 +785,18 @@ Directions: ${navigationLink}`
         },
       };
 
-      // Add tenant authentication - ensure we always have either apiKey or tenantId
       if (useApiKey && sanitizedApiKey.length > 0) {
         requestBody.apiKey = sanitizedApiKey;
       } else if (tenantId) {
         requestBody.tenantId = tenantId;
       } else {
-        // Default to demo key if no tenant specified (for testing)
         requestBody.apiKey = sanitizedApiKey || defaultApiKey || "demo-key-1";
       }
 
-      console.log("Submitting event with request body:", {
-        hasTitle: !!requestBody.title,
-        hasDescription: !!requestBody.description,
-        hasLocation: !!requestBody.location,
-        hasApiKey: !!requestBody.apiKey,
-        hasTenantId: !!requestBody.tenantId,
-        hasUserId: !!requestBody.userId,
-      });
-
       const response = await fetch(`${apiBaseUrl}${submitEventEndpoint}`, {
         method: "POST",
-        headers: { 
+        headers: {
           "Content-Type": "application/json",
-          // Also send API key in header as fallback
           ...(requestBody.apiKey && { "x-api-key": requestBody.apiKey }),
         },
         body: JSON.stringify(requestBody),
@@ -809,16 +813,12 @@ Directions: ${navigationLink}`
 
       if (!response.ok) {
         console.error("Submit error response:", result);
-        console.error("Response status:", response.status);
-        console.error("Response headers:", Object.fromEntries(response.headers.entries()));
         throw new Error(result.error || result.message || `Failed to create hang out (${response.status})`);
       }
 
       showNotification("success", "Hang out created successfully!");
       setShowForm(false);
-      
-      // Refresh AI events (user events will stream via Firestore)
-      await fetchAiSuggestions(false);
+      await loadAiSuggestions({ showSpinner: false, resetIndex: true });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to create hang out";
       showNotification("error", message);
@@ -849,7 +849,6 @@ Directions: ${navigationLink}`
         userId: user.uid,
       };
 
-      // Add tenant authentication
       if (useApiKey && sanitizedApiKey.length > 0) {
         requestBody.apiKey = sanitizedApiKey;
       } else if (tenantId) {
@@ -869,7 +868,7 @@ Directions: ${navigationLink}`
       }
 
       showNotification("success", "Hang out updated successfully!");
-      await fetchAiSuggestions(false);
+      await loadAiSuggestions({ showSpinner: false, resetIndex: false });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to update hang out";
       console.error("Update error:", err);
@@ -901,14 +900,13 @@ Directions: ${navigationLink}`
       const deleteParams = new URLSearchParams();
       deleteParams.set("eventId", id);
       deleteParams.set("userId", user.uid);
-      
-      // Add tenant authentication
+
       if (useApiKey && sanitizedApiKey.length > 0) {
         deleteParams.set("apiKey", sanitizedApiKey);
       } else if (tenantId) {
         deleteParams.set("tenantId", tenantId);
       }
-      
+
       const response = await fetch(`${apiBaseUrl}${deleteEventEndpoint}?${deleteParams.toString()}`, {
         method: "DELETE",
       });
@@ -920,7 +918,7 @@ Directions: ${navigationLink}`
       }
 
       showNotification("success", "Hang out deleted successfully!");
-      await fetchAiSuggestions(false);
+      await loadAiSuggestions({ showSpinner: false, resetIndex: true });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to delete hang out";
       console.error("Delete error:", err);
@@ -937,8 +935,14 @@ Directions: ${navigationLink}`
   };
 
   const removeTag = (tagToRemove: string) => {
-    setTags(tags.filter(t => t !== tagToRemove));
+    setTags(tags.filter((tag) => tag !== tagToRemove));
   };
+
+  useEffect(() => {
+    if (onEventsChange) {
+      onEventsChange(sortedHangouts);
+    }
+  }, [sortedHangouts, onEventsChange]);
 
   return (
     <div className="overflow-y-auto h-full pr-0 md:pr-2">
@@ -966,20 +970,18 @@ Directions: ${navigationLink}`
         </div>
       )}
 
-      {showAIEvents && includeAI && aiSourceBreakdown && aiCards.length > 0 && (
+      {showAIEvents && includeAI && aiSourceBreakdown && aiCardsRef.current.length > 0 && (
         <div className="mb-4 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-700">
           AI sources — OpenAI: {aiSourceBreakdown.openai ?? 0}, Gemini: {aiSourceBreakdown.gemini ?? 0}, Fallback:{" "}
           {aiSourceBreakdown.fallback ?? 0}
         </div>
       )}
 
-      {/* API Testing Controls - Only show if enabled */}
       {showTestingControls && (
         <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
           <h3 className="text-sm font-semibold text-gray-900 mb-2">API Testing Controls</h3>
-          
+
           <div className="space-y-2">
-            {/* Multi-Tenant Controls */}
             <div className="pb-2 border-b border-gray-300">
               <label className="block text-xs font-semibold text-gray-700 mb-2">Multi-Tenant Authentication</label>
               <div className="flex items-center gap-2 mb-2">
@@ -990,7 +992,9 @@ Directions: ${navigationLink}`
                   onChange={() => setUseApiKey(true)}
                   className="w-4 h-4"
                 />
-                <label htmlFor="useApiKey" className="text-xs text-gray-700">API Key</label>
+                <label htmlFor="useApiKey" className="text-xs text-gray-700">
+                  API Key
+                </label>
                 <input
                   type="radio"
                   id="useTenantId"
@@ -998,7 +1002,9 @@ Directions: ${navigationLink}`
                   onChange={() => setUseApiKey(false)}
                   className="w-4 h-4 ml-3"
                 />
-                <label htmlFor="useTenantId" className="text-xs text-gray-700">Tenant ID</label>
+                <label htmlFor="useTenantId" className="text-xs text-gray-700">
+                  Tenant ID
+                </label>
               </div>
               {useApiKey ? (
                 <input
@@ -1017,37 +1023,35 @@ Directions: ${navigationLink}`
                   className="w-full px-2 py-1 text-xs border border-gray-300 rounded text-gray-900"
                 />
               )}
-              <p className="text-xs text-gray-500 mt-1">
-                Demo keys: demo-key-1, demo-key-2, test-key
-              </p>
+              <p className="text-xs text-gray-500 mt-1">Demo keys: demo-key-1, demo-key-2, test-key</p>
             </div>
 
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="includeAI"
-                    checked={includeAI}
-                    onChange={(e) => setIncludeAI(e.target.checked)}
-                    className="w-4 h-4"
-                  />
-                  <label htmlFor="includeAI" className="text-sm text-gray-700">
-                    Include AI Events
-                  </label>
-                </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="includeAI"
+                checked={includeAI}
+                onChange={(e) => setIncludeAI(e.target.checked)}
+                className="w-4 h-4"
+              />
+              <label htmlFor="includeAI" className="text-sm text-gray-700">
+                Include AI Events
+              </label>
+            </div>
 
-                {enableSorting && (
-                  <div>
-                    <label className="block text-xs text-gray-600 mb-1">Sort By</label>
-                    <select
-                      value={sortBy}
-                      onChange={(e) => setSortBy(e.target.value as "newest" | "nearest")}
-                      className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-gray-900"
-                    >
-                      <option value="newest">Newest First</option>
-                      <option value="nearest">Nearest First</option>
-                    </select>
-                  </div>
-                )}
+            {enableSorting && (
+              <div>
+                <label className="block text-xs text-gray-600 mb-1">Sort By</label>
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value as "newest" | "nearest")}
+                  className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-gray-900"
+                >
+                  <option value="newest">Newest First</option>
+                  <option value="nearest">Nearest First</option>
+                </select>
+              </div>
+            )}
 
             <div>
               <label className="block text-xs text-gray-600 mb-1">Location (for AI)</label>
@@ -1067,7 +1071,7 @@ Directions: ${navigationLink}`
                   type="text"
                   value={tagInput}
                   onChange={(e) => setTagInput(e.target.value)}
-                  onKeyPress={(e) => e.key === "Enter" && addTag()}
+                  onKeyDown={(e) => e.key === "Enter" && addTag()}
                   placeholder="Add tag"
                   className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded text-gray-900"
                 />
@@ -1103,7 +1107,7 @@ Directions: ${navigationLink}`
               <input
                 type="number"
                 value={limit}
-                onChange={(e) => setLimit(parseInt(e.target.value) || 50)}
+                onChange={(e) => setLimit(parseInt(e.target.value, 10) || 50)}
                 min="1"
                 max="100"
                 className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-gray-900"
@@ -1111,10 +1115,11 @@ Directions: ${navigationLink}`
             </div>
 
             <button
-              onClick={() => fetchAiSuggestions(true)}
+              onClick={() => loadAiSuggestions({ showSpinner: true, resetIndex: true })}
               className="w-full px-3 py-1 text-sm bg-gray-600 text-white rounded hover:bg-gray-700"
+              disabled={aiLoading}
             >
-              Refresh Events
+              {aiLoading ? "Refreshing…" : "Refresh Events"}
             </button>
           </div>
         </div>
@@ -1132,8 +1137,8 @@ Directions: ${navigationLink}`
               </button>
               <button
                 type="button"
-                onClick={() => fetchAiSuggestions(true)}
-                disabled={isAiLoading || hangoutsLoading}
+                onClick={() => loadAiSuggestions({ showSpinner: true, resetIndex: true })}
+                disabled={aiLoading || hangoutsLoading}
                 className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
                 aria-label="Refresh hang outs"
               >
@@ -1144,17 +1149,17 @@ Directions: ${navigationLink}`
           </div>
 
           {showForm && (
-                <EventForm 
-                  onSubmit={handleSubmit} 
-                  onCancel={() => setShowForm(false)}
-                  apiBaseUrl={apiBaseUrl}
-                  submitEventEndpoint={submitEventEndpoint}
-                  eventLabel={eventLabel}
-                  primaryColor={primaryColor}
-                />
-              )}
-            </>
+            <EventForm
+              onSubmit={handleSubmit}
+              onCancel={() => setShowForm(false)}
+              apiBaseUrl={apiBaseUrl}
+              submitEventEndpoint={submitEventEndpoint}
+              eventLabel={eventLabel}
+              primaryColor={primaryColor}
+            />
           )}
+        </>
+      )}
 
       {!user && (
         <div className="mb-4 p-3 bg-yellow-100 text-yellow-700 rounded-lg">
@@ -1164,21 +1169,20 @@ Directions: ${navigationLink}`
 
       <div className="mt-6 flex flex-1 flex-col">
         <div className="relative flex-1">
-          {showInitialLoader ? (
+          {!readyToRender ? (
             <div className="flex h-full min-h-[280px] items-center justify-center rounded-2xl border border-gray-200 bg-white/70 shadow-sm">
               <Loader />
             </div>
           ) : currentAdventure ? (
-            <AnimatePresence mode="wait" initial={!hasAnimatedInitialCard}>
+            <AnimatePresence mode="wait" initial={!initialAnimationPlayedRef.current}>
               <motion.div
-                key={currentAdventure.id ?? `adventure-${currentCardIndex}`}
+                key={currentAdventure.id ?? `adventure-${panelState.currentIndex}`}
                 initial={{ opacity: 0, y: 16 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -16 }}
-                transition={{ duration: 0.25, ease: "easeOut" }}
+                transition={{ duration: 0.35, ease: "easeOut" }}
                 className="h-full"
               >
-                {/* Single-card presentation with subtle motion for smoother transitions */}
                 <EventCard
                   event={currentAdventure}
                   aiBadgeText={aiBadgeText}
@@ -1196,7 +1200,7 @@ Directions: ${navigationLink}`
                     currentAdventure.createdBy === user?.uid
                       ? (updates: Partial<Event>) => {
                           if (currentAdventure.id) {
-                            handleUpdate(currentAdventure.id, updates, currentAdventure.createdBy);
+                            void handleUpdate(currentAdventure.id, updates, currentAdventure.createdBy);
                           }
                         }
                       : undefined
@@ -1208,7 +1212,7 @@ Directions: ${navigationLink}`
                     currentAdventure.createdBy !== "ai"
                       ? () => {
                           if (currentAdventure.id) {
-                            handleDelete(currentAdventure.id, currentAdventure.createdBy);
+                            void handleDelete(currentAdventure.id, currentAdventure.createdBy);
                           }
                         }
                       : undefined
@@ -1226,7 +1230,7 @@ Directions: ${navigationLink}`
         <button
           type="button"
           onClick={handleNextAdventure}
-          disabled={totalAdventureCards <= 1}
+          disabled={!readyToRender || totalAdventureCards <= 1}
           className="mt-4 inline-flex items-center justify-center gap-2 rounded-full bg-blue-600 px-6 py-3 text-sm font-semibold text-white shadow-lg transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
           aria-label="View the next adventure card"
         >
@@ -1236,17 +1240,14 @@ Directions: ${navigationLink}`
           </span>
         </button>
 
-        {totalAdventureCards > 0 && (
+        {readyToRender && totalAdventureCards > 0 && (
           <p className="mt-2 text-xs text-gray-500">
-            Adventure {currentCardIndex + 1} of {totalAdventureCards}
+            Adventure {panelState.currentIndex + 1} of {totalAdventureCards}
           </p>
         )}
 
-        {isAdventureEmpty && showAIEvents && includeAI && aiError && (
+        {noAdventuresAvailable && showAIEvents && includeAI && aiError && (
           <p className="mt-3 text-xs font-medium text-red-600">{aiError}</p>
-        )}
-        {loadingCards && totalAdventureCards > 0 && (
-          <p className="mt-3 text-xs text-gray-400">Fetching fresh adventures…</p>
         )}
       </div>
 
@@ -1258,7 +1259,6 @@ Directions: ${navigationLink}`
           </div>
         </div>
       )}
-
     </div>
   );
 }
