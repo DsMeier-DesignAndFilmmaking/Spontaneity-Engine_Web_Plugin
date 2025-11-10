@@ -309,7 +309,7 @@ export default function EventFeed({
     activeId: null,
   });
   const [readyToRender, setReadyToRender] = useState(false);
-  const initialAnimationPlayedRef = useRef(false);
+  const [hasRenderedFirstCard, setHasRenderedFirstCard] = useState(false);
   const aiCardsRef = useRef<Event[]>([]);
   const [initialHangoutsReady, setInitialHangoutsReady] = useState(false);
 
@@ -519,15 +519,15 @@ Directions: ${navigationLink}`
     commitCombinedCards();
   }, [sortedHangouts, includeAI, showAIEvents, readyToRender, commitCombinedCards]);
 
-  useEffect(() => {
-    if (readyToRender && !initialAnimationPlayedRef.current) {
-      initialAnimationPlayedRef.current = true;
-    }
-  }, [readyToRender]);
-
   const currentAdventure = readyToRender ? selectDisplayedCard(panelState) : null;
   const totalAdventureCards = panelState.cards.length;
   const noAdventuresAvailable = readyToRender && totalAdventureCards === 0;
+
+  useEffect(() => {
+    if (readyToRender && currentAdventure && !hasRenderedFirstCard) {
+      setHasRenderedFirstCard(true);
+    }
+  }, [readyToRender, currentAdventure, hasRenderedFirstCard]);
 
   const handleNextAdventure = useCallback(() => {
     setPanelState((previous) => {
@@ -1174,7 +1174,7 @@ Directions: ${navigationLink}`
               <Loader />
             </div>
           ) : currentAdventure ? (
-            <AnimatePresence mode="wait" initial={!initialAnimationPlayedRef.current}>
+            <AnimatePresence mode="wait" initial={!hasRenderedFirstCard}>
               <motion.div
                 key={currentAdventure.id ?? `adventure-${panelState.currentIndex}`}
                 initial={{ opacity: 0, y: 16 }}
