@@ -8,7 +8,7 @@ import EventForm from "./EventForm";
 import Loader from "./Loader";
 import { useAuth } from "./AuthContext";
 import { Event, EventFormData } from "@/lib/types";
-import { combineAdventureCards, getNextAdventureIndex, normalizeAdventureIndex } from "@/lib/adventureCards";
+import { combineAdventureCards, getNextAdventureIndex } from "@/lib/adventureCards";
 import type { AdventureCard } from "@/lib/adventureCards";
 import { getCurrentLocation } from "@/lib/hooks/useGeolocation";
 import { useHangoutsFeed } from "@/lib/hooks/useHangoutsFeed";
@@ -278,34 +278,99 @@ export default function EventFeed({
     return sorted;
   }, [hangOuts, enableSorting, sortBy, userCoordinates]);
 
-  // Combine AI and user-created adventures to drive the single-card carousel UI.
-  const adventureCards = useMemo<AdventureCard[]>(
-    () =>
-      combineAdventureCards(
-        showAIEvents && includeAI ? aiCards : [],
-        sortedHangouts,
-      ),
-    [aiCards, includeAI, showAIEvents, sortedHangouts],
-  );
-
+  // Unified adventure card store to prevent partial renders and card flicker.
+  const [cards, setCards] = useState<AdventureCard[]>([]);
+  const [loadingCards, setLoadingCards] = useState(true);
   const [currentCardIndex, setCurrentCardIndex] = useState(0);
+  const [currentCardId, setCurrentCardId] = useState<string | null>(null);
 
-  // When the available cards change, make sure the current index remains within bounds.
+  const fetchingHangouts = hangoutsLoading || tenantResolving;
+  const fetchingAi = showAIEvents && includeAI ? isAiLoading : false;
+
   useEffect(() => {
-    setCurrentCardIndex((previous) => normalizeAdventureIndex(previous, adventureCards.length));
-  }, [adventureCards.length]);
+    const stillLoading = fetchingHangouts || fetchingAi;
+    setLoadingCards(stillLoading);
 
-  const currentAdventure = adventureCards[currentCardIndex] ?? null;
-
-  // Advance to the next adventure card while gracefully wrapping around the list.
-  const handleNextAdventure = useCallback(() => {
-    if (adventureCards.length === 0) {
+    if (stillLoading) {
       return;
     }
-    setCurrentCardIndex((previous) => getNextAdventureIndex(previous, adventureCards.length));
-  }, [adventureCards.length]);
 
-  const loading = hangoutsLoading || tenantResolving;
+    const combined = combineAdventureCards(showAIEvents && includeAI ? aiCards : [], sortedHangouts);
+
+    setCards((previous) => {
+      if (
+        previous.length === combined.length &&
+        previous.every((card, index) => card.id === combined[index]?.id)
+      ) {
+        return previous;
+      }
+      return combined;
+    });
+  }, [aiCards, fetchingAi, fetchingHangouts, includeAI, showAIEvents, sortedHangouts]);
+
+  useEffect(() => {
+    if (loadingCards) {
+      return;
+    }
+
+    if (cards.length === 0) {
+      if (currentCardIndex !== 0) {
+        setCurrentCardIndex(0);
+      }
+      if (currentCardId !== null) {
+        setCurrentCardId(null);
+      }
+      return;
+    }
+
+    const activeId = currentCardId ?? cards[0]?.id ?? null;
+
+    if (!activeId) {
+      const fallbackId = cards[0]?.id ?? null;
+      if (currentCardId !== fallbackId) {
+        setCurrentCardId(fallbackId);
+      }
+      if (currentCardIndex !== 0) {
+        setCurrentCardIndex(0);
+      }
+      return;
+    }
+
+    const nextIndex = cards.findIndex((card) => card.id === activeId);
+    if (nextIndex >= 0) {
+      if (currentCardIndex !== nextIndex) {
+        setCurrentCardIndex(nextIndex);
+      }
+      if (currentCardId !== activeId) {
+        setCurrentCardId(activeId);
+      }
+      return;
+    }
+
+    const fallbackId = cards[0]?.id ?? null;
+    if (currentCardId !== fallbackId) {
+      setCurrentCardId(fallbackId);
+    }
+    if (currentCardIndex !== 0) {
+      setCurrentCardIndex(0);
+    }
+  }, [cards, currentCardId, currentCardIndex, loadingCards]);
+
+  const currentAdventure = cards[currentCardIndex] ?? null;
+
+  const handleNextAdventure = useCallback(() => {
+    if (cards.length === 0) {
+      return;
+    }
+    const nextIndex = getNextAdventureIndex(currentCardIndex, cards.length);
+    setCurrentCardIndex(nextIndex);
+    setCurrentCardId(cards[nextIndex]?.id ?? null);
+  }, [cards, currentCardIndex]);
+
+  const totalAdventureCards = cards.length;
+  const showInitialLoader = loadingCards && totalAdventureCards === 0;
+  const isAdventureEmpty = !loadingCards && totalAdventureCards === 0;
+
   const locationPending = locationLoading;
   const combinedErrorMessage = hangoutsError?.message || null;
 
@@ -859,13 +924,6 @@ Directions: ${navigationLink}`
     setTags(tags.filter(t => t !== tagToRemove));
   };
 
-  const totalAdventureCards = adventureCards.length;
-  // Treat both Firestore and AI requests as "loading" only while there is nothing to show yet.
-  const isAdventureLoading =
-    (loading && sortedHangouts.length === 0) ||
-    (showAIEvents && includeAI && isAiLoading && aiCards.length === 0);
-  const isAdventureEmpty = totalAdventureCards === 0 && !isAdventureLoading;
-
   return (
     <div className="overflow-y-auto h-full pr-0 md:pr-2">
       {notification && (
@@ -1090,7 +1148,7 @@ Directions: ${navigationLink}`
 
       <div className="mt-6 flex flex-1 flex-col">
         <div className="relative flex-1">
-          {isAdventureLoading ? (
+          {showInitialLoader ? (
             <div className="flex h-full min-h-[280px] items-center justify-center rounded-2xl border border-gray-200 bg-white/70 shadow-sm">
               <Loader />
             </div>
@@ -1170,6 +1228,9 @@ Directions: ${navigationLink}`
 
         {isAdventureEmpty && showAIEvents && includeAI && aiError && (
           <p className="mt-3 text-xs font-medium text-red-600">{aiError}</p>
+        )}
+        {loadingCards && totalAdventureCards > 0 && (
+          <p className="mt-3 text-xs text-gray-400">Fetching fresh adventures…</p>
         )}
       </div>
 
