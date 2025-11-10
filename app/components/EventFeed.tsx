@@ -345,10 +345,9 @@ export default function EventFeed({
       return nextSnapshot;
     });
 
-    if (nextSnapshot) {
-      setDisplayedCard(
-        nextSnapshot.cards.length > 0 ? nextSnapshot.cards[Math.max(0, nextSnapshot.currentIndex)] ?? null : null,
-      );
+    const snapshot = nextSnapshot;
+    if (snapshot && snapshot.cards.length > 0) {
+      setDisplayedCard(snapshot.cards[Math.max(0, snapshot.currentIndex)] ?? null);
     } else {
       setDisplayedCard(null);
     }
@@ -385,10 +384,11 @@ export default function EventFeed({
       return nextSnapshot;
     });
 
-    if (nextSnapshot) {
-      setDisplayedCard(
-        nextSnapshot.cards.length > 0 ? nextSnapshot.cards[Math.max(0, nextSnapshot.currentIndex)] ?? null : null,
-      );
+    const snapshot = nextSnapshot;
+    if (snapshot && snapshot.cards.length > 0) {
+      setDisplayedCard(snapshot.cards[Math.max(0, snapshot.currentIndex)] ?? null);
+    } else {
+      setDisplayedCard(null);
     }
   }, []);
 
