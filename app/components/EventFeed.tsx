@@ -45,6 +45,12 @@ interface UpdateEventPayload {
   tenantId?: string;
 }
 
+type CarouselSnapshot = {
+  cards: AdventureCard[];
+  currentIndex: number;
+  activeId: string | null;
+};
+
 interface EventFeedProps {
   onEventsChange?: (events: Event[]) => void;
   defaultApiKey?: string;
@@ -279,11 +285,7 @@ export default function EventFeed({
   }, [hangOuts, enableSorting, sortBy, userCoordinates]);
 
   // Unified adventure card store to prevent partial renders and card flicker.
-  const [carouselState, setCarouselState] = useState<{
-    cards: AdventureCard[];
-    currentIndex: number;
-    activeId: string | null;
-  }>({
+  const [carouselState, setCarouselState] = useState<CarouselSnapshot>({
     cards: [],
     currentIndex: 0,
     activeId: null,
@@ -306,7 +308,7 @@ export default function EventFeed({
 
     const combined = combineAdventureCards(showAIEvents && includeAI ? aiCards : [], sortedHangouts);
 
-    let nextSnapshot: { cards: AdventureCard[]; currentIndex: number; activeId: string | null } | null = null;
+    let nextSnapshot: CarouselSnapshot | null = null;
 
     setCarouselState((previous) => {
       if (combined.length === 0) {
@@ -345,7 +347,7 @@ export default function EventFeed({
       return nextSnapshot;
     });
 
-    const snapshot = nextSnapshot;
+    const snapshot: CarouselSnapshot | null = nextSnapshot;
     if (snapshot && snapshot.cards.length > 0) {
       setDisplayedCard(snapshot.cards[Math.max(0, snapshot.currentIndex)] ?? null);
     } else {
@@ -368,7 +370,7 @@ export default function EventFeed({
   const currentAdventure = displayedCard;
 
   const handleNextAdventure = useCallback(() => {
-    let nextSnapshot: { cards: AdventureCard[]; currentIndex: number; activeId: string | null } | null = null;
+    let nextSnapshot: CarouselSnapshot | null = null;
 
     setCarouselState((previous) => {
       if (previous.cards.length === 0) {
@@ -384,7 +386,7 @@ export default function EventFeed({
       return nextSnapshot;
     });
 
-    const snapshot = nextSnapshot;
+    const snapshot: CarouselSnapshot | null = nextSnapshot;
     if (snapshot && snapshot.cards.length > 0) {
       setDisplayedCard(snapshot.cards[Math.max(0, snapshot.currentIndex)] ?? null);
     } else {
